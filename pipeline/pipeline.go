@@ -1,50 +1,218 @@
 package pipeline
 
 import (
+	"bufio"
+	"context"
 	"fmt"
+	"os"
 	perror "polvo/error"
-
-	"golang.org/x/sync/errgroup"
+	plogger "polvo/logger"
+	"sync"
+	"sync/atomic"
 )
 
-type Pipeline interface {
+type Pipeline[logWrapper any] interface {
 	// Getter & Setter
 	Name() string
+	Pipeline() chan logWrapper
 	// methods
-	Start()
-	Stop()
+	Start(string, ...string)
+	Stop() error
 }
 
-type pipeline struct {
-	eg         *errgroup.Group
+type pipeline[logWrapper any] struct {
 	sensorName string
+	pipeline   chan logWrapper
+	// stream
+	readStream  *os.File
+	writeStream *os.File
+	scanner     *bufio.Scanner
+	// thread control
+	ctx    context.Context
+	cancel context.CancelFunc
+	// wait group for scanner thread print all logs before close
+	waitScanner sync.WaitGroup
+	wrapFunc    func(string) (logWrapper, error)
+	promise     Promise
+	// conditional variable
+	isClosed int32
+	// dependency
+	logger plogger.PolvoLogger
 }
 
-func NewPipeline(sensorName string) (Pipeline, error) {
+func NewPipeline[logWrapper any](
+	sensorName string,
+	maxSize uint,
+	logger plogger.PolvoLogger,
+	wrapFunc func(string) (logWrapper, error)) (Pipeline[logWrapper], error) {
+
+	var err error
+
 	// param check
 	if sensorName == "" {
 		return nil, perror.PolvoPipelineError{
 			Code:   perror.ErrInvalidSensorName,
-			Origin: fmt.Errorf("Invalid sensor name %s", sensorName),
+			Origin: fmt.Errorf("invalid sensor name %s", sensorName),
 			Msg:    "error while construct new pipeline",
 		}
 	}
-
-	newPipe := new(pipeline)
+	newPipe := new(pipeline[logWrapper])
 
 	newPipe.sensorName = sensorName
-	newPipe.eg = new(errgroup.Group)
+	// init pipeline
+	if maxSize == 0 {
+		newPipe.pipeline = make(chan logWrapper)
+	} else {
+		newPipe.pipeline = make(chan logWrapper, maxSize)
+	}
+
+	// init stream
+	newPipe.readStream, newPipe.writeStream, err = os.Pipe()
+	if err != nil {
+		logger.PrintError("error while create console %s", err.Error())
+		return nil, perror.PolvoPipelineError{
+			Code:   perror.ErrSensorExecute,
+			Origin: err,
+			Msg:    "error while construct new pipeline",
+		}
+	}
+	newPipe.scanner = bufio.NewScanner(newPipe.readStream)
+	newPipe.ctx, newPipe.cancel = context.WithCancel(context.Background())
+	// init waitGroup
+	newPipe.waitScanner = sync.WaitGroup{}
+	newPipe.promise = nil
+	newPipe.wrapFunc = wrapFunc
+	// set conditional variable to 0
+	atomic.StoreInt32(&newPipe.isClosed, 0)
+	// set dependencies
+	newPipe.logger = logger
 	return newPipe, nil
 }
 
-func (p *pipeline) Name() string {
+/****************************************************
+* Getter & Setter
+****************************************************/
+
+func (p *pipeline[logWrapper]) Name() string {
 	return p.sensorName
 }
 
-func (p *pipeline) Start() {
-
+func (p *pipeline[logWrapper]) Pipeline() chan logWrapper {
+	return p.pipeline
 }
 
-func (p *pipeline) Stop() {
+/****************************************************
+* Pipeline methods
+****************************************************/
 
+func (p *pipeline[logWrapper]) Start(arg0 string, arg1 ...string) {
+	// start scanner thread
+	go p.scannerThread()
+	// start sensor thread
+	go p.sensorThread(arg0, arg1...)
+}
+
+func (p *pipeline[logWrapper]) Stop() (err error) {
+	// stop sensor thread
+
+	// prevent Call Stop() before Start()
+	if p.promise != nil {
+		err = p.promise.Cancel()
+		if err != nil {
+			return perror.PolvoGeneralError{
+				Code:   perror.InvalidOperationError,
+				Origin: err,
+				Msg:    fmt.Sprintf("error while execute pipeline[%s].Stop()", p.sensorName),
+			}
+		}
+	}
+	err = p.promise.Cancel()
+	if err != nil {
+		return perror.PolvoPipelineError{
+			Code:   perror.ErrSensorPanic,
+			Origin: err,
+			Msg:    fmt.Sprintf("error while execute pipeline[%s].Stop()", p.sensorName),
+		}
+	}
+	// check if console is already closed
+	if atomic.LoadInt32(&p.isClosed) > 0 {
+		return perror.PolvoGeneralError{
+			Code:   perror.InvalidOperationError,
+			Origin: fmt.Errorf("pipeline is already closed"),
+			Msg:    fmt.Sprintf("error while execute pipeline[%s].Close()", p.sensorName),
+		}
+	}
+	// send EOF to writeStream
+	err = p.writeStream.Close()
+	if err != nil {
+		return perror.PolvoPipelineError{
+			Code:   perror.ErrSensorPanic,
+			Origin: err,
+			Msg:    fmt.Sprintf("error while execute pipeline[%s].Close()", p.sensorName),
+		}
+	}
+	// wait for scanner thread to Flush
+	p.waitScanner.Wait()
+	// close readStream
+	err = p.readStream.Close()
+	if err != nil {
+		return perror.PolvoPipelineError{
+			Code:   perror.ErrSensorPanic,
+			Origin: err,
+			Msg:    fmt.Sprintf("error while execute pipeline[%s].Close()", p.sensorName),
+		}
+	}
+	// set conditional variable to 1
+	atomic.AddInt32(&p.isClosed, 1)
+	return nil
+}
+
+func (p *pipeline[logWrapper]) scannerThread() {
+	var (
+		log logWrapper
+		err error
+	)
+
+	p.logger.PrintInfo("pipeline [%s]: scanner thread is started", p.sensorName)
+	// set waitGroup
+	p.waitScanner.Add(1)
+	defer p.waitScanner.Done()
+	// read from readStream
+	// write to logger
+	for p.scanner.Scan() {
+		// select {
+		// case <-c.ctx.Done():
+		// 	c.logger.PrintInfo("console: scanner thread is canceled")
+		// 	return
+		// default:
+		// 	c.logger.PrintInfo("console: %s", c.scanner.Text())
+		// }
+		log, err = p.wrapFunc(p.scanner.Text())
+		if err != nil {
+			p.logger.PrintError("pipeline [%s] sensor: error while wrap log. %s", p.sensorName, err.Error())
+		}
+		// send log to pipeline
+		p.pipeline <- log
+	}
+	if err := p.scanner.Err(); err != nil {
+		p.logger.PrintError("pipeline [%s] sensor: error while read from sensor. %s", p.sensorName, err.Error())
+	}
+	p.logger.PrintInfo("pipeline [%s]: scanner thread is closed", p.sensorName)
+}
+
+func (p *pipeline[logWrapper]) sensorThread(argv0 string, argv1 ...string) {
+	// execute sensor
+
+	// prevent duplicated sensor thread
+	if p.promise != nil {
+		return
+	}
+	// run sensor
+	p.promise = Run(os.Stdin, p.writeStream, argv0, argv1...)
+	p.logger.PrintInfo("pipeline [%s]: sensor thread is started", p.sensorName)
+	// blocked until sensor thread is finished
+	if err := p.promise.Wait(); err != nil {
+		p.logger.PrintError("pipeline [%s]: error while execute sensor. %s", p.sensorName, err.Error())
+	}
+	p.logger.PrintInfo("pipeline [%s]: sensor thread is closed", p.sensorName)
 }
