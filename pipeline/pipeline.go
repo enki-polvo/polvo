@@ -58,24 +58,16 @@ func NewPipeline[logWrapper any](
 	}
 	newPipe := new(pipeline[logWrapper])
 
-	newPipe.sensorName = sensorName
-	// init pipeline
-	if maxSize == 0 {
-		newPipe.pipeline = make(chan logWrapper)
-	} else {
-		newPipe.pipeline = make(chan logWrapper, maxSize)
-	}
-
-	// init stream
-	newPipe.readStream, newPipe.writeStream, err = os.Pipe()
+	// open stream
+	err = newPipe.openStream(maxSize)
 	if err != nil {
-		logger.PrintError("error while create console %s", err.Error())
 		return nil, perror.PolvoPipelineError{
 			Code:   perror.ErrSensorExecute,
 			Origin: err,
 			Msg:    "error while construct new pipeline",
 		}
 	}
+	newPipe.sensorName = sensorName
 	newPipe.scanner = bufio.NewScanner(newPipe.readStream)
 	newPipe.ctx, newPipe.cancel = context.WithCancel(context.Background())
 	// init waitGroup
@@ -87,6 +79,35 @@ func NewPipeline[logWrapper any](
 	// set dependencies
 	newPipe.logger = logger
 	return newPipe, nil
+}
+
+func (p *pipeline[logWrapper]) openStream(maxSize uint) (err error) {
+	if atomic.LoadInt32(&p.isClosed) > 0 || p.pipeline != nil {
+		return perror.PolvoGeneralError{
+			Code:   perror.InvalidOperationError,
+			Origin: fmt.Errorf("pipeline is already opened"),
+			Msg:    fmt.Sprintf("error while execute pipeline[%s].Open()", p.sensorName),
+		}
+	}
+
+	// init pipeline
+	if maxSize == 0 {
+		p.pipeline = make(chan logWrapper)
+	} else {
+		p.pipeline = make(chan logWrapper, maxSize)
+	}
+
+	// init stream
+	p.readStream, p.writeStream, err = os.Pipe()
+	if err != nil {
+		p.logger.PrintError("error while create console %s", err.Error())
+		return perror.PolvoPipelineError{
+			Code:   perror.ErrSensorExecute,
+			Origin: err,
+			Msg:    "error while construct new pipeline",
+		}
+	}
+	return nil
 }
 
 /****************************************************
@@ -110,6 +131,8 @@ func (p *pipeline[logWrapper]) Start(arg0 string, arg1 ...string) {
 	go p.scannerThread()
 	// start sensor thread
 	go p.sensorThread(arg0, arg1...)
+	// set conditional variable to 0
+	atomic.AddInt32(&p.isClosed, 0)
 }
 
 func (p *pipeline[logWrapper]) Stop() (err error) {
@@ -162,8 +185,12 @@ func (p *pipeline[logWrapper]) Stop() (err error) {
 			Msg:    fmt.Sprintf("error while execute pipeline[%s].Close()", p.sensorName),
 		}
 	}
+	// close pipeline
+	close(p.pipeline)
+	p.pipeline = nil
 	// set conditional variable to 1
 	atomic.AddInt32(&p.isClosed, 1)
+	p.promise = nil
 	return nil
 }
 

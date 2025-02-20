@@ -2,20 +2,21 @@ package main
 
 import (
 	"fmt"
-	"polvo/pipeline"
+	_ "polvo/logger"
+	_ "polvo/pipeline"
 )
 
 func main() {
-	var (
-		pipe pipeline.Pipeline
-		err  error
-	)
+	// var (
+	// 	pipe pipeline.Pipeline
+	// 	err  error
+	// )
 
-	pipe, err = pipeline.NewPipeline("sensor")
-	if err != nil {
-		panic(err)
-	}
-	pipe.Start()
-	pipe.Stop()
+	// pipe, err = pipeline.NewPipeline("sensor")
+	// if err != nil {
+	// 	panic(err)
+	// }
+	// pipe.Start()
+	// pipe.Stop()
 	fmt.Println("hello world")
 }

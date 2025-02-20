@@ -57,7 +57,7 @@ func TestMain(m *testing.M) {
 	os.Exit(code)
 }
 
-func TestPipeline(t *testing.T) {
+func TestPipelineLoop100(t *testing.T) {
 	pipe.Start(filepath.Join(pwd, "testdata", "dummy.sh"))
 	for i := 0; i < 100; i++ {
 		log := <-pipe.Pipeline()
