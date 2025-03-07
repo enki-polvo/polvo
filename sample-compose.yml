@@ -1,0 +1,18 @@
+sensors:
+    ebpf_sensor:
+        exec_path: ebpf
+        param: --event=""
+    
+exporters:
+    otel:
+        destination: "localhost:4317"
+        timeout: 5s
+
+service:
+    machine: "test server"
+    os: "linux"
+    arch: "x86_64"
+    description: "Sample test service"
+    pipeline:
+        sensors: [ebpf_sensor]
+        exporters: [otel]
