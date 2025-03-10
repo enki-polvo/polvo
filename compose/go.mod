@@ -2,4 +2,7 @@ module polvo/compose
 
 go 1.23.3
 
-require gopkg.in/yaml.v3 v3.0.1 // indirect
+require (
+	github.com/alecthomas/participle v0.7.1 // indirect
+	gopkg.in/yaml.v3 v3.0.1 // indirect
+)

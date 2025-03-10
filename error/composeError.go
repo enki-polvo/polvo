@@ -9,6 +9,9 @@ const (
 	UnsupportedOsError
 	UnsupportedArchError
 	SensorNotFoundError
+	InvalidSensorError
+	InvalidExporterError
+	InvalidServiceError
 )
 
 type PolvoComposeError struct {
