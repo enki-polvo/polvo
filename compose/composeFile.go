@@ -26,8 +26,8 @@ import (
 //
 // - service: service contains machine, os, arch, description, and pipeline. pipeline defines sensor & exporter composition.
 type ComposeFile interface {
-	GetSensorCompose(name string) *Sensor
-	GetExporterCompose(name string) *Exporter
+	GetSensorCompose(name string) *SensorInfo
+	GetExporterCompose(name string) *ExporterInfo
 	GetServiceCompose() *Service
 	String() string
 }
@@ -37,9 +37,9 @@ type composeFile struct {
 }
 
 // Getter for Sensor
-func (c *composeFile) GetSensorCompose(name string) *Sensor {
+func (c *composeFile) GetSensorCompose(name string) *SensorInfo {
 	var (
-		ret Sensor
+		ret SensorInfo
 		ok  bool
 	)
 
@@ -50,9 +50,9 @@ func (c *composeFile) GetSensorCompose(name string) *Sensor {
 }
 
 // Getter for Exporter
-func (c *composeFile) GetExporterCompose(name string) *Exporter {
+func (c *composeFile) GetExporterCompose(name string) *ExporterInfo {
 	var (
-		ret Exporter
+		ret ExporterInfo
 		ok  bool
 	)
 
@@ -173,14 +173,14 @@ func NewComposeFile(composeFilePath string) (ComposeFile, error) {
 }
 
 // getSensor constructs Sensor struct from SensorWrapper & verifies the sensor compose file.
-func (c *composeFile) getSensor(wrapperMap map[string]SensorWrapper) (map[string]Sensor, error) {
+func (c *composeFile) getSensor(wrapperMap map[string]SensorWrapper) (map[string]SensorInfo, error) {
 	var (
-		sensorMap    map[string]Sensor
+		sensorMap    map[string]SensorInfo
 		execFileInfo os.FileInfo
 		err          error
 	)
 
-	sensorMap = make(map[string]Sensor)
+	sensorMap = make(map[string]SensorInfo)
 
 	for sensorName, sensorObj := range wrapperMap {
 		// null check
@@ -223,7 +223,7 @@ func (c *composeFile) getSensor(wrapperMap map[string]SensorWrapper) (map[string
 			}
 		}
 		// add sensor
-		sensorMap[sensorName] = Sensor{
+		sensorMap[sensorName] = SensorInfo{
 			Name:         sensorName,
 			execPath:     sensorObj.ExecPath,
 			param:        sensorObj.Param,
@@ -258,8 +258,8 @@ func isValidIPPort(addr string) bool {
 }
 
 // getExporter constructs Exporter struct from ExporterWrapper & verifies the exporter compose file.
-func (c *composeFile) getExporters(wrapperMap map[string]ExporterWrapper) (map[string]Exporter, error) {
-	exporterMap := make(map[string]Exporter)
+func (c *composeFile) getExporters(wrapperMap map[string]ExporterWrapper) (map[string]ExporterInfo, error) {
+	exporterMap := make(map[string]ExporterInfo)
 
 	for exporterName, exporterObj := range wrapperMap {
 		// null check
@@ -288,7 +288,7 @@ func (c *composeFile) getExporters(wrapperMap map[string]ExporterWrapper) (map[s
 			}
 		}
 		// add exporter to map
-		exporterMap[exporterName] = Exporter{
+		exporterMap[exporterName] = ExporterInfo{
 			Name:        exporterName,
 			destination: exporterObj.Destination,
 			timeout:     exporterObj.Timeout,
@@ -326,10 +326,10 @@ func (c *composeFile) getService(wrapper ServiceWrapper) (*Service, error) {
 		}
 	}
 	// check pipeline is valid
-	pipelines := make(map[string]Pipeline)
+	pipelines := make(map[string]PipelineInfo)
 	for pipeName, pipeline := range wrapper.Pipelines {
-		sensors := make([]*Sensor, 0)
-		exporters := make([]*Exporter, 0)
+		sensors := make([]*SensorInfo, 0)
+		exporters := make([]*ExporterInfo, 0)
 		// null check
 		if len(pipeline.Sensors) <= 0 {
 			return nil, perror.PolvoComposeError{
@@ -370,7 +370,7 @@ func (c *composeFile) getService(wrapper ServiceWrapper) (*Service, error) {
 		}
 		// TODO: read valid exporter & sensor from config file
 		// add pipeline to map
-		pipelines[pipeName] = Pipeline{
+		pipelines[pipeName] = PipelineInfo{
 			sensors:   sensors,
 			exporters: exporters,
 		}

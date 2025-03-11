@@ -30,8 +30,8 @@ type ComposeWrapper struct {
 }
 
 type Compose struct {
-	sensors   map[string]Sensor
-	exporters map[string]Exporter
+	sensors   map[string]SensorInfo
+	exporters map[string]ExporterInfo
 	service   *Service
 }
 
@@ -41,15 +41,15 @@ type Service struct {
 	arch        string
 	group       string
 	description string
-	pipeline    map[string]Pipeline
+	pipeline    map[string]PipelineInfo
 }
 
-type Pipeline struct {
-	sensors   []*Sensor
-	exporters []*Exporter
+type PipelineInfo struct {
+	sensors   []*SensorInfo
+	exporters []*ExporterInfo
 }
 
-type Sensor struct {
+type SensorInfo struct {
 	Name         string
 	execPath     string
 	param        string
@@ -57,7 +57,7 @@ type Sensor struct {
 	eventsHeader map[string][]string
 }
 
-type Exporter struct {
+type ExporterInfo struct {
 	Name        string
 	destination string
 	timeout     int
