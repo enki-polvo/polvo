@@ -26,8 +26,8 @@ func TestMain(m *testing.M) {
 	os.Exit(code)
 }
 
-func TestComposeOpen(t *testing.T) {
-	composr, err := compose.NewComposer(filepath.Join(pwd, "testdata", "compose_true.yml"))
+func TestComposeFileOpen(t *testing.T) {
+	composr, err := compose.NewComposeFile(filepath.Join(pwd, "testdata", "compose_true.yml"))
 	if err != nil {
 		t.Errorf("error while create composer %v", err)
 		return
@@ -50,8 +50,8 @@ func TestComposeOpen(t *testing.T) {
 	t.Logf("sensor: %v", composr.String())
 }
 
-func TestComposeFailedInSensorWrongExecPath(t *testing.T) {
-	_, err := compose.NewComposer(filepath.Join(pwd, "testdata", "compose_sensor_wrong_execute_path.yml"))
+func TestComposeFileFailedInSensorWrongExecPath(t *testing.T) {
+	_, err := compose.NewComposeFile(filepath.Join(pwd, "testdata", "compose_sensor_wrong_execute_path.yml"))
 	if err == nil {
 		t.Errorf("error should be created in composer %v", err)
 		return
@@ -65,8 +65,8 @@ func TestComposeFailedInSensorWrongExecPath(t *testing.T) {
 	}
 }
 
-func TestComposeFailedInSensorNotExecutable(t *testing.T) {
-	_, err := compose.NewComposer(filepath.Join(pwd, "testdata", "compose_sensor_not_executable.yml"))
+func TestComposeFileFailedInSensorNotExecutable(t *testing.T) {
+	_, err := compose.NewComposeFile(filepath.Join(pwd, "testdata", "compose_sensor_not_executable.yml"))
 	if err == nil {
 		t.Errorf("error should be created in composer %v", err)
 		return
@@ -80,8 +80,8 @@ func TestComposeFailedInSensorNotExecutable(t *testing.T) {
 	}
 }
 
-func TestComposeFailedInExporterWrongDestination(t *testing.T) {
-	_, err := compose.NewComposer(filepath.Join(pwd, "testdata", "compose_exporter_wrong_destination.yml"))
+func TestComposeFileFailedInExporterWrongDestination(t *testing.T) {
+	_, err := compose.NewComposeFile(filepath.Join(pwd, "testdata", "compose_exporter_wrong_destination.yml"))
 	if err == nil {
 		t.Errorf("error should be created in composer %v", err)
 		return
@@ -95,8 +95,8 @@ func TestComposeFailedInExporterWrongDestination(t *testing.T) {
 	}
 }
 
-func TestComposeFailedInExporterWrongTimeout(t *testing.T) {
-	_, err := compose.NewComposer(filepath.Join(pwd, "testdata", "compose_exporter_wrong_timeout.yml"))
+func TestComposeFileFailedInExporterWrongTimeout(t *testing.T) {
+	_, err := compose.NewComposeFile(filepath.Join(pwd, "testdata", "compose_exporter_wrong_timeout.yml"))
 	if err == nil {
 		t.Errorf("error should be created in composer %v", err)
 		return
@@ -110,8 +110,8 @@ func TestComposeFailedInExporterWrongTimeout(t *testing.T) {
 	}
 }
 
-func TestComposeFailedInServiceWrongSensorInPipeline(t *testing.T) {
-	_, err := compose.NewComposer(filepath.Join(pwd, "testdata", "compose_service_wrong_sensor_in_pipeline.yml"))
+func TestComposeFileFailedInServiceWrongSensorInPipeline(t *testing.T) {
+	_, err := compose.NewComposeFile(filepath.Join(pwd, "testdata", "compose_service_wrong_sensor_in_pipeline.yml"))
 	if err == nil {
 		t.Errorf("error should be created in composer %v", err)
 		return
@@ -125,8 +125,8 @@ func TestComposeFailedInServiceWrongSensorInPipeline(t *testing.T) {
 	}
 }
 
-func TestComposeFailedInServiceWrongExporterInPipeline(t *testing.T) {
-	_, err := compose.NewComposer(filepath.Join(pwd, "testdata", "compose_service_wrong_exporter_in_pipeline.yml"))
+func TestComposeFileFailedInServiceWrongExporterInPipeline(t *testing.T) {
+	_, err := compose.NewComposeFile(filepath.Join(pwd, "testdata", "compose_service_wrong_exporter_in_pipeline.yml"))
 	if err == nil {
 		t.Errorf("error should be created in composer %v", err)
 		return

@@ -12,10 +12,9 @@ import (
 	_ "github.com/alecthomas/participle"
 
 	"gopkg.in/yaml.v3"
-	_ "gopkg.in/yaml.v3"
 )
 
-// # Composer
+// # ComposeFile
 //
 // reads polvo-compose.yml file and constructs a Compose struct.
 //
@@ -26,19 +25,19 @@ import (
 // - exporters: exporter contains exporter destination and timeout.
 //
 // - service: service contains machine, os, arch, description, and pipeline. pipeline defines sensor & exporter composition.
-type Composer interface {
+type ComposeFile interface {
 	GetSensorCompose(name string) *Sensor
 	GetExporterCompose(name string) *Exporter
 	GetServiceCompose() *Service
 	String() string
 }
 
-type composer struct {
+type composeFile struct {
 	compose *Compose
 }
 
 // Getter for Sensor
-func (c *composer) GetSensorCompose(name string) *Sensor {
+func (c *composeFile) GetSensorCompose(name string) *Sensor {
 	var (
 		ret Sensor
 		ok  bool
@@ -51,7 +50,7 @@ func (c *composer) GetSensorCompose(name string) *Sensor {
 }
 
 // Getter for Exporter
-func (c *composer) GetExporterCompose(name string) *Exporter {
+func (c *composeFile) GetExporterCompose(name string) *Exporter {
 	var (
 		ret Exporter
 		ok  bool
@@ -64,12 +63,12 @@ func (c *composer) GetExporterCompose(name string) *Exporter {
 }
 
 // Getter for Service
-func (c *composer) GetServiceCompose() *Service {
+func (c *composeFile) GetServiceCompose() *Service {
 	return c.compose.service
 }
 
-// Stringer for Composer
-func (c *composer) String() string {
+// Stringer for ComposeFile
+func (c *composeFile) String() string {
 	sensorStr := "compose: \n-------------Sensor --------------\n"
 	for sensorName, sensor := range c.compose.sensors {
 		sensorStr += fmt.Sprintf("%s:\n\texec_path: %v\n\tparam: %s\n\trun_as_root: %v\n\tevents_header: %v\n", sensorName,
@@ -107,12 +106,12 @@ func (c *composer) String() string {
 	return sensorStr + exporterStr + serviceStr
 }
 
-func NewComposer(composeFilePath string) (Composer, error) {
+func NewComposeFile(composeFilePath string) (ComposeFile, error) {
 	var (
 		wrapper ComposeWrapper
 	)
 
-	newComp := new(composer)
+	newComp := new(composeFile)
 
 	// read config file
 	file, err := os.ReadFile(composeFilePath)
@@ -121,13 +120,13 @@ func NewComposer(composeFilePath string) (Composer, error) {
 			return nil, perror.PolvoGeneralError{
 				Code:   perror.InvalidArgumentError,
 				Origin: err,
-				Msg:    "error while Construct new composer",
+				Msg:    "error while Construct new composeFile",
 			}
 		}
 		return nil, perror.PolvoGeneralError{
 			Code:   perror.SystemError,
 			Origin: err,
-			Msg:    "error while Construct new composer",
+			Msg:    "error while Construct new composeFile",
 		}
 	}
 
@@ -137,7 +136,7 @@ func NewComposer(composeFilePath string) (Composer, error) {
 		return nil, perror.PolvoComposeError{
 			Code:   perror.ErrInvalidCompose,
 			Origin: err,
-			Msg:    "error while Construct new composer",
+			Msg:    "error while Construct new composeFile",
 		}
 	}
 
@@ -148,7 +147,7 @@ func NewComposer(composeFilePath string) (Composer, error) {
 		return nil, perror.PolvoComposeError{
 			Code:   perror.ErrInvalidCompose,
 			Origin: err,
-			Msg:    "error while Construct new composer",
+			Msg:    "error while Construct new composeFile",
 		}
 	}
 	// get exporter from wrapper
@@ -157,7 +156,7 @@ func NewComposer(composeFilePath string) (Composer, error) {
 		return nil, perror.PolvoComposeError{
 			Code:   perror.ErrInvalidCompose,
 			Origin: err,
-			Msg:    "error while Construct new composer",
+			Msg:    "error while Construct new composeFile",
 		}
 	}
 	// get service from wrapper
@@ -166,7 +165,7 @@ func NewComposer(composeFilePath string) (Composer, error) {
 		return nil, perror.PolvoComposeError{
 			Code:   perror.ErrInvalidCompose,
 			Origin: err,
-			Msg:    "error while Construct new composer",
+			Msg:    "error while Construct new composeFile",
 		}
 	}
 
@@ -174,7 +173,7 @@ func NewComposer(composeFilePath string) (Composer, error) {
 }
 
 // getSensor constructs Sensor struct from SensorWrapper & verifies the sensor compose file.
-func (c *composer) getSensor(wrapperMap map[string]SensorWrapper) (map[string]Sensor, error) {
+func (c *composeFile) getSensor(wrapperMap map[string]SensorWrapper) (map[string]Sensor, error) {
 	var (
 		sensorMap    map[string]Sensor
 		execFileInfo os.FileInfo
@@ -259,7 +258,7 @@ func isValidIPPort(addr string) bool {
 }
 
 // getExporter constructs Exporter struct from ExporterWrapper & verifies the exporter compose file.
-func (c *composer) getExporters(wrapperMap map[string]ExporterWrapper) (map[string]Exporter, error) {
+func (c *composeFile) getExporters(wrapperMap map[string]ExporterWrapper) (map[string]Exporter, error) {
 	exporterMap := make(map[string]Exporter)
 
 	for exporterName, exporterObj := range wrapperMap {
@@ -299,7 +298,7 @@ func (c *composer) getExporters(wrapperMap map[string]ExporterWrapper) (map[stri
 }
 
 // getService constructs Service struct from ServiceWrapper & verifies the service compose file.
-func (c *composer) getService(wrapper ServiceWrapper) (*Service, error) {
+func (c *composeFile) getService(wrapper ServiceWrapper) (*Service, error) {
 	var (
 		service Service
 	)
