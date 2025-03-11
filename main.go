@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"os"
 	_ "polvo/logger"
-	_ "polvo/pipeline"
+	_ "polvo/sensorPipe"
 )
 
 func main() {

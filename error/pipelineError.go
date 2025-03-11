@@ -6,6 +6,7 @@ type PolvoErrPipeline int
 
 const (
 	ErrInvalidSensorName PolvoErrPipeline = iota
+	ErrSensorCreate
 	ErrSensorExecute
 	ErrSensorPanic
 	ErrPipelineKill
