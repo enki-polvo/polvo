@@ -1,0 +1,44 @@
+sensors:
+    sensor1:
+        exec_path: ./testdata/wrong_sensor_sample
+        param: --events="bashReadLine,vfsOpen"
+        run_as_root: true
+        events_header:
+            bashReadLine:
+                - "PID"
+                - "UID"
+                - "Username"
+                - "CommandLine"
+            vfsOpen:
+                - "PID"
+                - "UID"
+                - "Username"
+                - "Fullpath"
+                - "Flags"
+                - "FlagsInterpretation"
+
+exporters:
+    exporter1:
+        destination: "localhost:4317"
+        timeout: 5
+
+# filters:
+#     filter_agent:
+#         detection:
+#             filter_agent:
+#                 FileName|contains: "ebpf_sensor"
+#             filter_cmd:
+#                 CommandLine|endswith: "ebpf_sensor"
+#             condition: 1 of filter_*
+
+service:
+    description: "Sample test service"
+    group: "Sample group"
+    pipelines:
+        trace_pipe:
+            sensors: [sensor1]
+            # filters: [filter_agent]
+            exporters: [exporter1]
+        log_pipe:
+            sensors: [sensor1]
+            exporters: [exporter1]

@@ -1,0 +1,43 @@
+sensors:
+    ebpf_sensor:
+        exec_path: ebpf
+        param: --event=""
+        run_as_root: true
+        events_header:
+            bashReadLine:
+                - "PID"
+                - "UID"
+                - "Username"
+                - "CommandLine"
+            vfsOpen:
+                - "PID"
+                - "UID"
+                - "Username"
+                - "Fullpath"
+                - "Flags"
+                - "FlagsInterpretation"
+
+exporters:
+    otel:
+        destination: "localhost:4317"
+        timeout: 5
+
+# filters:
+#     filter_agent:
+#         detection:
+#             filter_agent:
+#                 FileName|contains: "ebpf_sensor"
+#             filter_cmd:
+#                 CommandLine|endswith: "ebpf_sensor"
+#             condition: 1 of filter_*
+
+service:
+    description: "Sample test service"
+    pipelines:
+        trace_pipe:
+            sensors: [ebpf_sensor]
+            # filters: [filter_agent]
+            exporters: [otel]
+        # log_pipe:
+        #     sensors: [ebpf_sensor]
+        #     exporters: [opensearch]
