@@ -36,29 +36,29 @@ type Compose struct {
 }
 
 type Service struct {
-	machine     string
-	os          string
-	arch        string
-	group       string
-	description string
-	pipeline    map[string]PipelineInfo
+	Machine     string
+	OS          string
+	Arch        string
+	Group       string
+	Description string
+	Pipeline    map[string]PipelineInfo
 }
 
 type PipelineInfo struct {
-	sensors   []*SensorInfo
-	exporters []*ExporterInfo
+	Sensors   []*SensorInfo
+	Exporters []*ExporterInfo
 }
 
 type SensorInfo struct {
 	Name         string
-	execPath     string
-	param        string
-	runAsRoot    bool
-	eventsHeader map[string][]string
+	ExecPath     string
+	Param        string
+	RunAsRoot    bool
+	EventsHeader map[string][]string
 }
 
 type ExporterInfo struct {
 	Name        string
-	destination string
-	timeout     int
+	Destination string
+	Timeout     int
 }

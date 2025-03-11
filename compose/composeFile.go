@@ -72,32 +72,32 @@ func (c *composeFile) String() string {
 	sensorStr := "compose: \n-------------Sensor --------------\n"
 	for sensorName, sensor := range c.compose.sensors {
 		sensorStr += fmt.Sprintf("%s:\n\texec_path: %v\n\tparam: %s\n\trun_as_root: %v\n\tevents_header: %v\n", sensorName,
-			sensor.execPath,
-			sensor.param,
-			sensor.runAsRoot,
-			sensor.eventsHeader)
+			sensor.ExecPath,
+			sensor.Param,
+			sensor.RunAsRoot,
+			sensor.EventsHeader)
 	}
 	exporterStr := "-------------Exporter --------------\n"
 	for exporterName, exporter := range c.compose.exporters {
-		exporterStr += fmt.Sprintf("%s:\n\tdestination: %v\n\ttimeout: %v\n", exporterName, exporter.destination, exporter.timeout)
+		exporterStr += fmt.Sprintf("%s:\n\tdestination: %v\n\ttimeout: %v\n", exporterName, exporter.Destination, exporter.Timeout)
 	}
 	serviceStr := fmt.Sprintf("-------------Service --------------\n\tmachine: %v\n\tos: %v\n\tarch: %v\n\tgroup: %v\n\tdescription: %v",
-		c.compose.service.machine,
-		c.compose.service.os,
-		c.compose.service.arch,
-		c.compose.service.group,
-		c.compose.service.description)
-	for pipeName, pipeline := range c.compose.service.pipeline {
+		c.compose.service.Machine,
+		c.compose.service.OS,
+		c.compose.service.Arch,
+		c.compose.service.Group,
+		c.compose.service.Description)
+	for pipeName, pipeline := range c.compose.service.Pipeline {
 		serviceStr += fmt.Sprintf("\n\t%s:\n\t\t%s: %v", pipeName, "sensors", func() []string {
 			ret := make([]string, 0)
-			for _, sensor := range pipeline.sensors {
+			for _, sensor := range pipeline.Sensors {
 				ret = append(ret, sensor.Name)
 			}
 			return ret
 		}())
 		serviceStr += fmt.Sprintf("\n\t\t%s: %v", "exporters", func() []string {
 			ret := make([]string, 0)
-			for _, exporter := range pipeline.exporters {
+			for _, exporter := range pipeline.Exporters {
 				ret = append(ret, exporter.Name)
 			}
 			return ret
@@ -225,10 +225,10 @@ func (c *composeFile) getSensor(wrapperMap map[string]SensorWrapper) (map[string
 		// add sensor
 		sensorMap[sensorName] = SensorInfo{
 			Name:         sensorName,
-			execPath:     sensorObj.ExecPath,
-			param:        sensorObj.Param,
-			runAsRoot:    sensorObj.RunAsRoot,
-			eventsHeader: sensorObj.EventsHeader,
+			ExecPath:     sensorObj.ExecPath,
+			Param:        sensorObj.Param,
+			RunAsRoot:    sensorObj.RunAsRoot,
+			EventsHeader: sensorObj.EventsHeader,
 		}
 	}
 	return sensorMap, nil
@@ -290,8 +290,8 @@ func (c *composeFile) getExporters(wrapperMap map[string]ExporterWrapper) (map[s
 		// add exporter to map
 		exporterMap[exporterName] = ExporterInfo{
 			Name:        exporterName,
-			destination: exporterObj.Destination,
-			timeout:     exporterObj.Timeout,
+			Destination: exporterObj.Destination,
+			Timeout:     exporterObj.Timeout,
 		}
 	}
 	return exporterMap, nil
@@ -371,8 +371,8 @@ func (c *composeFile) getService(wrapper ServiceWrapper) (*Service, error) {
 		// TODO: read valid exporter & sensor from config file
 		// add pipeline to map
 		pipelines[pipeName] = PipelineInfo{
-			sensors:   sensors,
-			exporters: exporters,
+			Sensors:   sensors,
+			Exporters: exporters,
 		}
 	}
 	// get machine from os
@@ -390,12 +390,12 @@ func (c *composeFile) getService(wrapper ServiceWrapper) (*Service, error) {
 
 	// add service
 	service = Service{
-		machine:     serviceMachine,
-		os:          serviceOS,
-		arch:        serviceArch,
-		group:       wrapper.Group,
-		description: wrapper.Description,
-		pipeline:    pipelines,
+		Machine:     serviceMachine,
+		OS:          serviceOS,
+		Arch:        serviceArch,
+		Group:       wrapper.Group,
+		Description: wrapper.Description,
+		Pipeline:    pipelines,
 	}
 
 	return &service, nil
