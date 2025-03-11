@@ -20,7 +20,7 @@ sensors:
 exporters:
     otel:
         destination: "localhost:4317"
-        timeout: 5s
+        timeout: 5
 
 # filters:
 #     filter_agent:

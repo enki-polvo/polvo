@@ -1,9 +1,5 @@
 package compose
 
-import (
-	"net/url"
-)
-
 type SensorWrapper struct {
 	ExecPath     string              `yaml:"exec_path"`
 	Param        string              `yaml:"param"`
@@ -22,8 +18,6 @@ type PipelineWrapper struct {
 }
 
 type ServiceWrapper struct {
-	Os          string                     `yaml:"os"`
-	Arch        string                     `yaml:"arch"`
 	Description string                     `yaml:"description"`
 	Group       string                     `yaml:"group"`
 	Pipelines   map[string]PipelineWrapper `yaml:"pipelines"`
@@ -38,7 +32,7 @@ type ComposeWrapper struct {
 type Compose struct {
 	sensors   map[string]Sensor
 	exporters map[string]Exporter
-	service   Service
+	service   *Service
 }
 
 type Service struct {
@@ -56,6 +50,7 @@ type Pipeline struct {
 }
 
 type Sensor struct {
+	Name         string
 	execPath     string
 	param        string
 	runAsRoot    bool
@@ -63,6 +58,7 @@ type Sensor struct {
 }
 
 type Exporter struct {
-	destination *url.URL
+	Name        string
+	destination string
 	timeout     int
 }

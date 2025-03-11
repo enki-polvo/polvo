@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"os"
 	_ "polvo/logger"
 	_ "polvo/pipeline"
 )
@@ -18,5 +19,10 @@ func main() {
 	// }
 	// pipe.Start()
 	// pipe.Stop()
+	hostname, err := os.Hostname()
+	if err != nil {
+		panic(err)
+	}
+	fmt.Println(hostname)
 	fmt.Println("hello world")
 }

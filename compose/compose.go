@@ -2,10 +2,12 @@ package compose
 
 import (
 	"fmt"
-	"net/url"
+	"net"
 	"os"
 	perror "polvo/error"
 	"runtime"
+	"strconv"
+	"strings"
 
 	_ "github.com/alecthomas/participle"
 
@@ -27,6 +29,8 @@ import (
 type Composer interface {
 	GetSensorCompose(name string) *Sensor
 	GetExporterCompose(name string) *Exporter
+	GetServiceCompose() *Service
+	String() string
 }
 
 type composer struct {
@@ -61,7 +65,46 @@ func (c *composer) GetExporterCompose(name string) *Exporter {
 
 // Getter for Service
 func (c *composer) GetServiceCompose() *Service {
-	return &c.compose.service
+	return c.compose.service
+}
+
+// Stringer for Composer
+func (c *composer) String() string {
+	sensorStr := "compose: \n-------------Sensor --------------\n"
+	for sensorName, sensor := range c.compose.sensors {
+		sensorStr += fmt.Sprintf("%s:\n\texec_path: %v\n\tparam: %s\n\trun_as_root: %v\n\tevents_header: %v\n", sensorName,
+			sensor.execPath,
+			sensor.param,
+			sensor.runAsRoot,
+			sensor.eventsHeader)
+	}
+	exporterStr := "-------------Exporter --------------\n"
+	for exporterName, exporter := range c.compose.exporters {
+		exporterStr += fmt.Sprintf("%s:\n\tdestination: %v\n\ttimeout: %v\n", exporterName, exporter.destination, exporter.timeout)
+	}
+	serviceStr := fmt.Sprintf("-------------Service --------------\n\tmachine: %v\n\tos: %v\n\tarch: %v\n\tgroup: %v\n\tdescription: %v",
+		c.compose.service.machine,
+		c.compose.service.os,
+		c.compose.service.arch,
+		c.compose.service.group,
+		c.compose.service.description)
+	for pipeName, pipeline := range c.compose.service.pipeline {
+		serviceStr += fmt.Sprintf("\n\t%s:\n\t\t%s: %v", pipeName, "sensors", func() []string {
+			ret := make([]string, 0)
+			for _, sensor := range pipeline.sensors {
+				ret = append(ret, sensor.Name)
+			}
+			return ret
+		}())
+		serviceStr += fmt.Sprintf("\n\t\t%s: %v", "exporters", func() []string {
+			ret := make([]string, 0)
+			for _, exporter := range pipeline.exporters {
+				ret = append(ret, exporter.Name)
+			}
+			return ret
+		}())
+	}
+	return sensorStr + exporterStr + serviceStr
 }
 
 func NewComposer(composeFilePath string) (Composer, error) {
@@ -182,6 +225,7 @@ func (c *composer) getSensor(wrapperMap map[string]SensorWrapper) (map[string]Se
 		}
 		// add sensor
 		sensorMap[sensorName] = Sensor{
+			Name:         sensorName,
 			execPath:     sensorObj.ExecPath,
 			param:        sensorObj.Param,
 			runAsRoot:    sensorObj.RunAsRoot,
@@ -191,15 +235,32 @@ func (c *composer) getSensor(wrapperMap map[string]SensorWrapper) (map[string]Se
 	return sensorMap, nil
 }
 
+func isValidIPPort(addr string) bool {
+	// replace localhost to 127.0.0.1
+	addr = strings.Replace(addr, "localhost", "127.0.0.1", -1)
+	// IP check
+	host, port, err := net.SplitHostPort(addr)
+	if err != nil {
+		return false
+	}
+
+	// check IP
+	if net.ParseIP(host) == nil {
+		return false
+	}
+
+	// check port (0~65535)
+	portNum, err := strconv.Atoi(port)
+	if err != nil || portNum < 0 || portNum > 65535 {
+		return false
+	}
+
+	return true
+}
+
 // getExporter constructs Exporter struct from ExporterWrapper & verifies the exporter compose file.
 func (c *composer) getExporters(wrapperMap map[string]ExporterWrapper) (map[string]Exporter, error) {
-	var (
-		exporterMap map[string]Exporter
-		err         error
-		dest        *url.URL
-	)
-
-	exporterMap = make(map[string]Exporter)
+	exporterMap := make(map[string]Exporter)
 
 	for exporterName, exporterObj := range wrapperMap {
 		// null check
@@ -211,7 +272,7 @@ func (c *composer) getExporters(wrapperMap map[string]ExporterWrapper) (map[stri
 			}
 		}
 		// check destination is ip url format
-		if dest, err = url.ParseRequestURI(exporterObj.Destination); err != nil || dest.Host == "" {
+		if !isValidIPPort(exporterObj.Destination) {
 			return nil, perror.PolvoComposeError{
 				Code:   perror.InvalidExporterError,
 				Msg:    "error in getExporter.",
@@ -229,7 +290,8 @@ func (c *composer) getExporters(wrapperMap map[string]ExporterWrapper) (map[stri
 		}
 		// add exporter to map
 		exporterMap[exporterName] = Exporter{
-			destination: dest,
+			Name:        exporterName,
+			destination: exporterObj.Destination,
 			timeout:     exporterObj.Timeout,
 		}
 	}
@@ -237,42 +299,28 @@ func (c *composer) getExporters(wrapperMap map[string]ExporterWrapper) (map[stri
 }
 
 // getService constructs Service struct from ServiceWrapper & verifies the service compose file.
-func (c *composer) getService(wrapper ServiceWrapper) (Service, error) {
+func (c *composer) getService(wrapper ServiceWrapper) (*Service, error) {
 	var (
 		service Service
 	)
 
 	// null check
-	if wrapper.Os == "" {
-		return Service{}, perror.PolvoComposeError{
-			Code:   perror.InvalidServiceError,
-			Msg:    "error in getService.",
-			Origin: fmt.Errorf("os is empty"),
-		}
-	}
-	if wrapper.Arch == "" {
-		return Service{}, perror.PolvoComposeError{
-			Code:   perror.InvalidServiceError,
-			Msg:    "error in getService.",
-			Origin: fmt.Errorf("arch is empty"),
-		}
-	}
 	if wrapper.Description == "" {
-		return Service{}, perror.PolvoComposeError{
+		return nil, perror.PolvoComposeError{
 			Code:   perror.InvalidServiceError,
 			Msg:    "error in getService.",
 			Origin: fmt.Errorf("description is empty"),
 		}
 	}
 	if wrapper.Group == "" {
-		return Service{}, perror.PolvoComposeError{
+		return nil, perror.PolvoComposeError{
 			Code:   perror.InvalidServiceError,
 			Msg:    "error in getService.",
 			Origin: fmt.Errorf("group is empty"),
 		}
 	}
 	if len(wrapper.Pipelines) <= 0 {
-		return Service{}, perror.PolvoComposeError{
+		return nil, perror.PolvoComposeError{
 			Code:   perror.InvalidServiceError,
 			Msg:    "error in getService.",
 			Origin: fmt.Errorf("sensors is empty"),
@@ -285,14 +333,14 @@ func (c *composer) getService(wrapper ServiceWrapper) (Service, error) {
 		exporters := make([]*Exporter, 0)
 		// null check
 		if len(pipeline.Sensors) <= 0 {
-			return Service{}, perror.PolvoComposeError{
+			return nil, perror.PolvoComposeError{
 				Code:   perror.InvalidServiceError,
 				Msg:    "error in getService.",
 				Origin: fmt.Errorf("%s's sensors is empty", pipeName),
 			}
 		}
 		if len(pipeline.Exporters) <= 0 {
-			return Service{}, perror.PolvoComposeError{
+			return nil, perror.PolvoComposeError{
 				Code:   perror.InvalidServiceError,
 				Msg:    "error in getService.",
 				Origin: fmt.Errorf("%s's exporters is empty", pipeName),
@@ -302,7 +350,7 @@ func (c *composer) getService(wrapper ServiceWrapper) (Service, error) {
 		for _, sensorName := range pipeline.Sensors {
 			sensor, ok := c.compose.sensors[sensorName]
 			if !ok {
-				return Service{}, perror.PolvoComposeError{
+				return nil, perror.PolvoComposeError{
 					Code:   perror.InvalidServiceError,
 					Msg:    "error in getService.",
 					Origin: fmt.Errorf("%s's sensor %s is not defined", pipeName, sensorName),
@@ -313,7 +361,7 @@ func (c *composer) getService(wrapper ServiceWrapper) (Service, error) {
 		for _, exporterName := range pipeline.Exporters {
 			exporter, ok := c.compose.exporters[exporterName]
 			if !ok {
-				return Service{}, perror.PolvoComposeError{
+				return nil, perror.PolvoComposeError{
 					Code:   perror.InvalidServiceError,
 					Msg:    "error in getService.",
 					Origin: fmt.Errorf("%s's exporter %s is not defined", pipeName, exporterName),
@@ -331,7 +379,7 @@ func (c *composer) getService(wrapper ServiceWrapper) (Service, error) {
 	// get machine from os
 	serviceMachine, err := os.Hostname()
 	if err != nil {
-		return Service{}, perror.PolvoGeneralError{
+		return nil, perror.PolvoGeneralError{
 			Code:   perror.SystemError,
 			Msg:    "error in getService.",
 			Origin: err,
@@ -351,5 +399,5 @@ func (c *composer) getService(wrapper ServiceWrapper) (Service, error) {
 		pipeline:    pipelines,
 	}
 
-	return service, nil
+	return &service, nil
 }
