@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	perror "polvo/error"
 	"sync/atomic"
+	"syscall"
 
 	"golang.org/x/sync/errgroup"
 )
@@ -33,7 +34,10 @@ func Run(inStream *os.File, outStream *os.File, arg0 string, args ...string) Pro
 	prom.cmd = *exec.CommandContext(prom.ctx, arg0, args...)
 	prom.cmd.Stdin = inStream
 	prom.cmd.Stdout = outStream
-	prom.cmd.Stderr = outStream
+	// prom.cmd.Stderr = outStream
+
+	// generate process group
+	prom.cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 
 	// set the error for run commandline goroutine
 	prom.eg, _ = errgroup.WithContext(prom.ctx)
@@ -84,14 +88,24 @@ func (p *promise) Cancel() (err error) {
 			Origin: fmt.Errorf("promise is not initialized"),
 		}
 	}
-	if atomic.LoadInt32(&p.waitCnt) != 0 {
+	if atomic.LoadInt32(&p.waitCnt) < 0 {
 		return perror.PolvoGeneralError{
 			Code:   perror.InvalidOperationError,
 			Msg:    fmt.Sprintf("error while execute %s %v promise.Cancel()", p.cmd.Path, p.cmd.Args),
 			Origin: fmt.Errorf("promise is not initialized [%d]", atomic.LoadInt32(&p.waitCnt)),
 		}
 	}
+	pgid, err := syscall.Getpgid(p.cmd.Process.Pid)
+	// kill proc group
+	if err == nil {
+		fmt.Fprintf(os.Stderr, "Killing process group %d\n", pgid)
+		syscall.Kill(-pgid, syscall.SIGKILL)
+	}
+	// prevent zombie process
+	p.cmd.Wait()
+	p.cmd.Process.Release()
 	// cancel the context
 	p.cancel()
+
 	return nil
 }

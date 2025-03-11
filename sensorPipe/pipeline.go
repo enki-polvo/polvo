@@ -14,7 +14,7 @@ import (
 type Pipe[logWrapper any] interface {
 	// Getter & Setter
 	Name() string
-	LogChannel() chan logWrapper
+	LogChannel() <-chan logWrapper
 	// methods
 	Start(string, ...string)
 	Stop() error
@@ -118,7 +118,7 @@ func (p *pipe[logWrapper]) Name() string {
 	return p.sensorName
 }
 
-func (p *pipe[logWrapper]) LogChannel() chan logWrapper {
+func (p *pipe[logWrapper]) LogChannel() <-chan logWrapper {
 	return p.logChannel
 }
 
@@ -139,14 +139,11 @@ func (p *pipe[logWrapper]) Stop() (err error) {
 	// stop sensor thread
 
 	// prevent Call Stop() before Start()
-	if p.promise != nil {
-		err = p.promise.Cancel()
-		if err != nil {
-			return perror.PolvoGeneralError{
-				Code:   perror.InvalidOperationError,
-				Origin: err,
-				Msg:    fmt.Sprintf("error while execute pipeline[%s].Stop()", p.sensorName),
-			}
+	if p.promise == nil {
+		return perror.PolvoGeneralError{
+			Code:   perror.InvalidOperationError,
+			Origin: fmt.Errorf("pipeline is not started"),
+			Msg:    fmt.Sprintf("error while execute pipeline[%s].Stop()", p.sensorName),
 		}
 	}
 	err = p.promise.Cancel()
@@ -207,16 +204,10 @@ func (p *pipe[logWrapper]) scannerThread() {
 	// read from readStream
 	// write to logger
 	for p.scanner.Scan() {
-		// select {
-		// case <-c.ctx.Done():
-		// 	c.logger.PrintInfo("console: scanner thread is canceled")
-		// 	return
-		// default:
-		// 	c.logger.PrintInfo("console: %s", c.scanner.Text())
-		// }
 		log, err = p.wrapFunc(p.scanner.Text())
 		if err != nil {
 			p.logger.PrintError("pipeline [%s] sensor: error while wrap log. %s", p.sensorName, err.Error())
+			continue
 		}
 		// send log to pipeline
 		p.logChannel <- log

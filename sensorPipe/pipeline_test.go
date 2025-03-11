@@ -58,10 +58,14 @@ func TestMain(m *testing.M) {
 }
 
 func TestPipelineLoop100(t *testing.T) {
+	// pipe.Start(filepath.Join(pwd, "testdata", "sensor-ebpf"), "--events=\"all\"")
 	pipe.Start(filepath.Join(pwd, "testdata", "dummy.sh"))
 	for i := 0; i < 100; i++ {
 		log := <-pipe.LogChannel()
 		t.Logf("log: %v", log)
 	}
-	pipe.Stop()
+	err := pipe.Stop()
+	if err != nil {
+		t.Errorf("Error while stopping pipeline %v", err)
+	}
 }
