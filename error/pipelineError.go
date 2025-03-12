@@ -10,6 +10,8 @@ const (
 	ErrSensorExecute
 	ErrSensorPanic
 	ErrPipelineKill
+	ErrPipelineUnmarshal
+	ErrPipelineMarshal
 )
 
 type PolvoPipelineError struct {
