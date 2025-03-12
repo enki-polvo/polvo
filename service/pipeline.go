@@ -12,7 +12,8 @@ import (
 	"sync/atomic"
 )
 
-// DEPRECATED
+// (DEPRECATED)
+//
 // func CreateDynamicLogWrapperFromSensorInfo(fields []string) reflect.Type {
 // 	// create struct fields
 // 	structFields := make([]reflect.StructField, 0)
@@ -37,12 +38,14 @@ type worker struct {
 	// dependency injection
 	info *compose.SensorInfo // TODO: processor info will be added.
 	// sensor pipe
-	inboundChannel <-chan CommonHeaderWrapper
+	inboundChannel <-chan *CommonLogWrapper
 	// outbound pipes
-	outboundChannels map[string]chan interface{}
+	outboundChannels map[string]chan *CommonLogWrapper
+	// log processor pool
+	logprocessorPool sync.Pool
 }
 
-func newWorker(info *compose.SensorInfo, logChannel <-chan CommonHeaderWrapper) *worker {
+func newWorker(info *compose.SensorInfo, logChannel <-chan *CommonLogWrapper) *worker {
 	nw := new(worker)
 
 	// dependency injection
@@ -51,7 +54,8 @@ func newWorker(info *compose.SensorInfo, logChannel <-chan CommonHeaderWrapper) 
 	nw.ctx, nw.cancel = context.WithCancel(context.Background())
 	// set channels
 	nw.inboundChannel = logChannel
-	nw.outboundChannels = make(map[string]chan interface{})
+	nw.outboundChannels = make(map[string]chan *CommonLogWrapper)
+	// init sync pool
 	return nw
 }
 
@@ -74,6 +78,8 @@ func (w *worker) processorThread() {
 			return
 		case <-w.inboundChannel:
 			// process log
+			// send to outbound channels
+
 		}
 	}
 }
@@ -86,9 +92,9 @@ type pipeline struct {
 	info   *compose.PipelineInfo
 	// maps
 	workerMap     map[string]*worker
-	sensorPipeMap map[string]sensorPipe.Pipe[CommonHeaderWrapper]
+	sensorPipeMap map[string]sensorPipe.Pipe[CommonLogWrapper]
 	// sync pool
-	marshalPool sync.Pool
+	logWrapperPool sync.Pool
 }
 
 func NewPipeline(info *compose.PipelineInfo, loger plogger.PolvoLogger) (Pipeline, error) {
@@ -99,11 +105,11 @@ func NewPipeline(info *compose.PipelineInfo, loger plogger.PolvoLogger) (Pipelin
 	pl.info = info
 	// create maps
 	pl.workerMap = make(map[string]*worker)
-	pl.sensorPipeMap = make(map[string]sensorPipe.Pipe[CommonHeaderWrapper])
+	pl.sensorPipeMap = make(map[string]sensorPipe.Pipe[CommonLogWrapper])
 	// init sync pool
-	pl.marshalPool = sync.Pool{
+	pl.logWrapperPool = sync.Pool{
 		New: func() interface{} {
-			return new(CommonHeaderWrapper)
+			return new(CommonLogWrapper)
 		},
 	}
 
@@ -120,22 +126,43 @@ func NewPipeline(info *compose.PipelineInfo, loger plogger.PolvoLogger) (Pipelin
 		pl.sensorPipeMap[sensorInfo.Name] = sensorPipe
 		pl.workerMap[sensorInfo.Name] = newWorker(sensorInfo, sensorPipe.LogChannel())
 		// connect multiple exporter to worker
-
 	}
 	return pl, nil
 }
 
-func (p *pipeline) jsonUnMarshalFunc(log string) (CommonHeaderWrapper, error) {
+func (p *pipeline) jsonUnMarshalFunc(log string) (*CommonLogWrapper, error) {
+	// Reason for control sync pool flow in pipeline is to prevent GC overhead in massive data processing
 	// get from sync pool
-	common := p.marshalPool.Get().(*CommonHeaderWrapper)
-	// put back to sync pool
-	defer p.marshalPool.Put(common)
+	common := p.logWrapperPool.Get().(*CommonLogWrapper)
 	// unmarshal json
 	err := json.Unmarshal([]byte(log), common)
 	if err != nil {
-		return *common, err
+		// if error occurs, return log wrapper to pool
+		p.logWrapperPool.Put(common)
+		return nil, perror.PolvoPipelineError{
+			Code:   perror.ErrPipelineUnmarshal,
+			Origin: err,
+			Msg:    "error while unmarshal pipeline",
+		}
 	}
-	return *common, nil
+	return common, nil
+}
+
+func (p *pipeline) jsonMarshalFunc(logWrapper *CommonLogWrapper) (ret []byte, err error) {
+	// Reason for control sync pool flow in pipeline is to prevent GC overhead in massive data processing
+	ret, err = json.Marshal(logWrapper)
+	if err != nil {
+		// if error occurs, return log wrapper to pool
+		p.logWrapperPool.Put(logWrapper)
+		return nil, perror.PolvoPipelineError{
+			Code:   perror.ErrPipelineMarshal,
+			Origin: err,
+			Msg:    "error while marshal pipeline",
+		}
+	}
+	// return to sync pool
+	p.logWrapperPool.Put(logWrapper)
+	return ret, nil
 }
 
 func (p *pipeline) Start() {
