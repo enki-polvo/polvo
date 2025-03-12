@@ -11,18 +11,18 @@ import (
 	"sync/atomic"
 )
 
-type Pipe[logWrapper any] interface {
+type Pipe[log any] interface {
 	// Getter & Setter
 	Name() string
-	LogChannel() <-chan logWrapper
+	LogChannel() <-chan *log
 	// methods
 	Start(string, ...string)
 	Stop() error
 }
 
-type pipe[logWrapper any] struct {
+type pipe[log any] struct {
 	sensorName string
-	logChannel chan logWrapper
+	logChannel chan *log
 	// stream
 	readStream  *os.File
 	writeStream *os.File
@@ -32,7 +32,7 @@ type pipe[logWrapper any] struct {
 	cancel context.CancelFunc
 	// wait group for scanner thread print all logs before close
 	waitScanner sync.WaitGroup
-	wrapFunc    func(string) (logWrapper, error)
+	wrapFunc    func(string) (*log, error)
 	promise     Promise
 	// conditional variable
 	isClosed int32
@@ -40,11 +40,11 @@ type pipe[logWrapper any] struct {
 	logger plogger.PolvoLogger
 }
 
-func NewPipe[logWrapper any](
+func NewPipe[log any](
 	sensorName string,
 	maxSize uint,
 	logger plogger.PolvoLogger,
-	wrapFunc func(string) (logWrapper, error)) (Pipe[logWrapper], error) {
+	wrapFunc func(string) (*log, error)) (Pipe[log], error) {
 
 	var err error
 
@@ -56,7 +56,7 @@ func NewPipe[logWrapper any](
 			Msg:    "error while construct new pipeline",
 		}
 	}
-	newPipe := new(pipe[logWrapper])
+	newPipe := new(pipe[log])
 
 	// open stream
 	err = newPipe.openStream(maxSize)
@@ -81,7 +81,7 @@ func NewPipe[logWrapper any](
 	return newPipe, nil
 }
 
-func (p *pipe[logWrapper]) openStream(maxSize uint) (err error) {
+func (p *pipe[log]) openStream(maxSize uint) (err error) {
 	if atomic.LoadInt32(&p.isClosed) > 0 || p.logChannel != nil {
 		return perror.PolvoGeneralError{
 			Code:   perror.InvalidOperationError,
@@ -92,9 +92,9 @@ func (p *pipe[logWrapper]) openStream(maxSize uint) (err error) {
 
 	// init pipeline
 	if maxSize == 0 {
-		p.logChannel = make(chan logWrapper)
+		p.logChannel = make(chan *log)
 	} else {
-		p.logChannel = make(chan logWrapper, maxSize)
+		p.logChannel = make(chan *log, maxSize)
 	}
 
 	// init stream
@@ -114,11 +114,11 @@ func (p *pipe[logWrapper]) openStream(maxSize uint) (err error) {
 * Getter & Setter
 ****************************************************/
 
-func (p *pipe[logWrapper]) Name() string {
+func (p *pipe[log]) Name() string {
 	return p.sensorName
 }
 
-func (p *pipe[logWrapper]) LogChannel() <-chan logWrapper {
+func (p *pipe[log]) LogChannel() <-chan *log {
 	return p.logChannel
 }
 
@@ -126,7 +126,7 @@ func (p *pipe[logWrapper]) LogChannel() <-chan logWrapper {
 * Pipeline methods
 ****************************************************/
 
-func (p *pipe[logWrapper]) Start(arg0 string, arg1 ...string) {
+func (p *pipe[log]) Start(arg0 string, arg1 ...string) {
 	// start scanner thread
 	go p.scannerThread()
 	// start sensor thread
@@ -135,7 +135,7 @@ func (p *pipe[logWrapper]) Start(arg0 string, arg1 ...string) {
 	atomic.AddInt32(&p.isClosed, 0)
 }
 
-func (p *pipe[logWrapper]) Stop() (err error) {
+func (p *pipe[log]) Stop() (err error) {
 	// stop sensor thread
 
 	// prevent Call Stop() before Start()
@@ -191,9 +191,9 @@ func (p *pipe[logWrapper]) Stop() (err error) {
 	return nil
 }
 
-func (p *pipe[logWrapper]) scannerThread() {
+func (p *pipe[log]) scannerThread() {
 	var (
-		log logWrapper
+		lg  *log
 		err error
 	)
 
@@ -204,33 +204,47 @@ func (p *pipe[logWrapper]) scannerThread() {
 	// read from readStream
 	// write to logger
 	for p.scanner.Scan() {
-		log, err = p.wrapFunc(p.scanner.Text())
+		lg, err = p.wrapFunc(p.scanner.Text())
 		if err != nil {
+			// if error while wrap log, just skip this log
 			p.logger.PrintError("pipeline [%s] sensor: error while wrap log. %s", p.sensorName, err.Error())
 			continue
 		}
 		// send log to pipeline
-		p.logChannel <- log
+		p.logChannel <- lg
 	}
-	if err := p.scanner.Err(); err != nil {
+	if err = p.scanner.Err(); err != nil {
+		// EOF
 		p.logger.PrintError("pipeline [%s] sensor: error while read from sensor. %s", p.sensorName, err.Error())
 	}
 	p.logger.PrintInfo("pipeline [%s]: scanner thread is closed", p.sensorName)
 }
 
 func (p *pipe[logWrapper]) sensorThread(argv0 string, argv1 ...string) {
+	var err error
 	// execute sensor
-
 	// prevent duplicated sensor thread
 	if p.promise != nil {
 		return
 	}
 	// run sensor
-	p.promise = Run(os.Stdin, p.writeStream, argv0, argv1...)
+	p.promise, err = Run(os.Stdin, p.writeStream, argv0, argv1...)
+	if err != nil {
+		// if error occurs, uncontrollable error. so panic
+		p.logger.PrintError("failed to start pipeline [%s]: %v", p.sensorName, err)
+		panic(err)
+	}
 	p.logger.PrintInfo("pipeline [%s]: sensor thread is started", p.sensorName)
 	// blocked until sensor thread is finished
 	if err := p.promise.Wait(); err != nil {
-		p.logger.PrintError("pipeline [%s]: error while execute sensor. %s", p.sensorName, err.Error())
+		p.logger.PrintError("pipeline [%s]: error while execute sensor[%s]. kill sensor...", p.sensorName, err.Error())
+		// kill process to prevent zombie process
+		err = p.Stop()
+		if err != nil {
+			// if error occurs, uncontrollable error. so panic
+			p.logger.PrintError("pipeline [%s]: error while stop sensor[%s]. panic...", p.sensorName, err.Error())
+			panic(err)
+		}
 	}
 	p.logger.PrintInfo("pipeline [%s]: sensor thread is closed", p.sensorName)
 }

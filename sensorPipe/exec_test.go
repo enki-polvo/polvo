@@ -2,24 +2,31 @@ package sensorPipe_test
 
 import (
 	"os"
+	perror "polvo/error"
 	"polvo/sensorPipe"
+	"reflect"
 	"testing"
 )
 
 func TestPromise(t *testing.T) {
-	promise := sensorPipe.Run(os.Stdin, os.Stdout, "echo", "hello")
-	err := promise.Wait()
+	promise, err := sensorPipe.Run(os.Stdin, os.Stdout, "echo", "hello")
+	if err != nil {
+		t.Errorf("Error while executing promise %v", err)
+		return
+	}
+	err = promise.Wait()
 	if err != nil {
 		t.Errorf("Error while executing promise %v", err)
 	}
 }
 
 func TestPromiseError(t *testing.T) {
-	promise := sensorPipe.Run(os.Stdin, os.Stdout, "asdf", "ghjk")
-	err := promise.Wait()
-	if err == nil {
-		t.Errorf("Error should have been raised")
+	_, err := sensorPipe.Run(os.Stdin, os.Stdout, "asdf", "ghjk")
+	if err != nil && reflect.TypeOf(err) == reflect.TypeOf(perror.PolvoGeneralError{}) {
+		t.Logf("Error while executing promise %v", err)
+		return
 	}
+	t.Errorf("Error should have been raised")
 }
 
 /**********************************************************************************
@@ -53,14 +60,19 @@ func TestPromiseError(t *testing.T) {
 // }
 
 func TestWaitFuncCallDuplicated(t *testing.T) {
-	promise := sensorPipe.Run(os.Stdin, os.Stdout, "echo", "hello")
-	err := promise.Wait()
+	promise, err := sensorPipe.Run(os.Stdin, os.Stdout, "echo", "hello")
 	if err != nil {
 		t.Errorf("Error while executing promise %v", err)
+		return
+	}
+	err = promise.Wait()
+	if err != nil {
+		t.Errorf("Error while executing promise %v", err)
+		return
 	}
 	err = promise.Wait()
 	if err == nil {
-		t.Errorf("Error should have been raised")
+		t.Errorf("Error should have been raised when calling Wait() twice")
 	}
 	t.Logf("Error: %v", err)
 }

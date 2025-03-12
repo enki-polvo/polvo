@@ -10,15 +10,15 @@ import (
 	"testing"
 )
 
-type logWrapper struct {
+type Samplelog struct {
 	Event   string
 	Pid     string
 	Content string
 }
 
-func Wrap(log string) (logWrapper, error) {
+func Wrap(log string) (*Samplelog, error) {
 	chunk := strings.Split(log, " ")
-	return logWrapper{
+	return &Samplelog{
 		Event:   chunk[0],
 		Pid:     chunk[1],
 		Content: chunk[2],
@@ -28,7 +28,7 @@ func Wrap(log string) (logWrapper, error) {
 var (
 	pwd     string
 	loger   plogger.PolvoLogger
-	pipe    sensorPipe.Pipe[logWrapper]
+	pipe    sensorPipe.Pipe[Samplelog]
 	logpath string
 )
 
@@ -62,7 +62,7 @@ func TestPipelineLoop100(t *testing.T) {
 	pipe.Start(filepath.Join(pwd, "testdata", "dummy.sh"))
 	for i := 0; i < 100; i++ {
 		log := <-pipe.LogChannel()
-		t.Logf("log: %v", log)
+		t.Logf("log: %v", *log)
 	}
 	err := pipe.Stop()
 	if err != nil {
