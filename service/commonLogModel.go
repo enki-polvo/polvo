@@ -1,6 +1,6 @@
 package service
 
-type CommonHeaderWrapper struct {
+type CommonLogWrapper struct {
 	// Common log Header
 	EventName string      `json:"eventname"`
 	Source    string      `json:"source"`
