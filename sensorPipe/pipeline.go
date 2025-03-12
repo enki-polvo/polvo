@@ -243,7 +243,7 @@ func (p *pipe[logWrapper]) sensorThread(argv0 string, argv1 ...string) {
 		if err != nil {
 			// if error occurs, uncontrollable error. so panic
 			p.logger.PrintError("pipeline [%s]: error while stop sensor[%s]. panic...", p.sensorName, err.Error())
-			panic(err)
+			return
 		}
 	}
 	p.logger.PrintInfo("pipeline [%s]: sensor thread is closed", p.sensorName)
