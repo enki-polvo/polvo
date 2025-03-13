@@ -19,7 +19,12 @@ sensors:
 
 exporters:
     otel:
+        mode: "network"
         destination: "localhost:4317"
+        timeout: 5
+    file:
+        mode: "file"
+        destination: "/tmp/ebpf_sensor.log"
         timeout: 5
 
 # filters:

@@ -1,5 +1,21 @@
 package compose
 
+type ExporterMode []string
+
+var AvailableExporterMode ExporterMode = ExporterMode{
+	"file",
+	"network",
+}
+
+func (em ExporterMode) IsValid(mode string) bool {
+	for _, m := range em {
+		if m == mode {
+			return true
+		}
+	}
+	return false
+}
+
 type SensorWrapper struct {
 	ExecPath     string              `yaml:"exec_path"`
 	Param        string              `yaml:"param"`
@@ -8,6 +24,7 @@ type SensorWrapper struct {
 }
 
 type ExporterWrapper struct {
+	Mode        string `yaml:"mode"`
 	Destination string `yaml:"destination"`
 	Timeout     int    `yaml:"timeout"`
 }
@@ -59,6 +76,7 @@ type SensorInfo struct {
 
 type ExporterInfo struct {
 	Name        string
+	Mode        string
 	Destination string
 	Timeout     int
 }

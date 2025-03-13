@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"path/filepath"
 	perror "polvo/error"
 	"runtime"
 	"strconv"
@@ -79,7 +80,7 @@ func (c *composeFile) String() string {
 	}
 	exporterStr := "-------------Exporter --------------\n"
 	for exporterName, exporter := range c.compose.exporters {
-		exporterStr += fmt.Sprintf("%s:\n\tdestination: %v\n\ttimeout: %v\n", exporterName, exporter.Destination, exporter.Timeout)
+		exporterStr += fmt.Sprintf("%s:\n\tmode: %v\n\tdestination: %v\n\ttimeout: %v\n", exporterName, exporter.Mode, exporter.Destination, exporter.Timeout)
 	}
 	serviceStr := fmt.Sprintf("-------------Service --------------\n\tmachine: %v\n\tos: %v\n\tarch: %v\n\tgroup: %v\n\tdescription: %v",
 		c.compose.service.Machine,
@@ -257,12 +258,36 @@ func isValidIPPort(addr string) bool {
 	return true
 }
 
+func isValidPath(path string) (bool, error) {
+	dirPath := filepath.Dir(path)
+
+	// check directory path exists.
+	if _, err := os.Stat(dirPath); err != nil {
+		if os.IsNotExist(err) {
+			return false, nil
+		}
+		return true, perror.PolvoGeneralError{
+			Code:   perror.SystemError,
+			Msg:    "error in isValidPath.",
+			Origin: err,
+		}
+	}
+	return true, nil
+}
+
 // getExporter constructs Exporter struct from ExporterWrapper & verifies the exporter compose file.
 func (c *composeFile) getExporters(wrapperMap map[string]ExporterWrapper) (map[string]ExporterInfo, error) {
 	exporterMap := make(map[string]ExporterInfo)
 
 	for exporterName, exporterObj := range wrapperMap {
 		// null check
+		if exporterObj.Mode == "" {
+			return nil, perror.PolvoComposeError{
+				Code:   perror.InvalidExporterError,
+				Msg:    "error in getExporter.",
+				Origin: fmt.Errorf("mode is empty"),
+			}
+		}
 		if exporterObj.Destination == "" {
 			return nil, perror.PolvoComposeError{
 				Code:   perror.InvalidExporterError,
@@ -270,14 +295,36 @@ func (c *composeFile) getExporters(wrapperMap map[string]ExporterWrapper) (map[s
 				Origin: fmt.Errorf("destination is empty"),
 			}
 		}
-		// check destination is ip url format
-		if !isValidIPPort(exporterObj.Destination) {
+		// check mode is valid
+		if !AvailableExporterMode.IsValid(exporterObj.Mode) {
 			return nil, perror.PolvoComposeError{
 				Code:   perror.InvalidExporterError,
 				Msg:    "error in getExporter.",
-				Origin: fmt.Errorf("destination is not valid url"),
+				Origin: fmt.Errorf("mode [%s] is not valid", exporterObj.Mode),
 			}
-
+		}
+		// check destination is valid
+		switch exporterObj.Mode {
+		case "file":
+			// check destination is valid path
+			result, err := isValidPath(exporterObj.Destination)
+			if err != nil || !result {
+				return nil, perror.PolvoComposeError{
+					Code:   perror.InvalidExporterError,
+					Msg:    "error in getExporter.",
+					Origin: fmt.Errorf("destination [%s] is not valid path", exporterObj.Destination),
+				}
+			}
+		case "network":
+			// check destination is ip url format
+			// check destination is ip url format
+			if !isValidIPPort(exporterObj.Destination) {
+				return nil, perror.PolvoComposeError{
+					Code:   perror.InvalidExporterError,
+					Msg:    "error in getExporter.",
+					Origin: fmt.Errorf("destination is not valid url"),
+				}
+			}
 		}
 		// check timeout is valid
 		if exporterObj.Timeout <= 0 {
