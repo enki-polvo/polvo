@@ -9,9 +9,12 @@ const (
 	ErrSensorCreate
 	ErrSensorExecute
 	ErrSensorPanic
+	ErrInvalidPipelineCompose
 	ErrPipelineKill
 	ErrPipelineUnmarshal
 	ErrPipelineMarshal
+	ErrInvalidExporterName
+	ErrExporterCreate
 )
 
 type PolvoPipelineError struct {
