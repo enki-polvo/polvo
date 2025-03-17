@@ -30,8 +30,8 @@ type ExporterWrapper struct {
 }
 
 type PipelineWrapper struct {
-	Sensors   []string `yaml:"sensors"`
-	Exporters []string `yaml:"exporters"`
+	Sensors  []string `yaml:"sensors"`
+	Exporter string   `yaml:"exporter"`
 }
 
 type ServiceWrapper struct {
@@ -47,9 +47,9 @@ type ComposeWrapper struct {
 }
 
 type Compose struct {
-	sensors   map[string]SensorInfo
-	exporters map[string]ExporterInfo
-	service   *Service
+	Sensors   map[string]*SensorInfo
+	Exporters map[string]*ExporterInfo
+	Service   *Service
 }
 
 type Service struct {
@@ -62,8 +62,8 @@ type Service struct {
 }
 
 type PipelineInfo struct {
-	Sensors   []*SensorInfo
-	Exporters []*ExporterInfo
+	Sensors  []*SensorInfo
+	Exporter *ExporterInfo
 }
 
 type SensorInfo struct {

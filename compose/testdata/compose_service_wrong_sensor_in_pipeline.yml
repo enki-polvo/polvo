@@ -38,7 +38,7 @@ service:
         trace_pipe:
             sensors: [sensor_unknown]
             # filters: [filter_agent]
-            exporters: [exporter1]
+            exporter: exporter1
         log_pipe:
             sensors: [sensor1]
-            exporters: [exporter1]
+            exporter: exporter1

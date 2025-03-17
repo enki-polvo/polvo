@@ -42,7 +42,7 @@ service:
         trace_pipe:
             sensors: [ebpf_sensor]
             # filters: [filter_agent]
-            exporters: [otel]
+            exporter: otel
         # log_pipe:
         #     sensors: [ebpf_sensor]
-        #     exporters: [opensearch]
+        #     exporter: opensearch

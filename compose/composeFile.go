@@ -40,38 +40,38 @@ type composeFile struct {
 // Getter for Sensor
 func (c *composeFile) GetSensorCompose(name string) *SensorInfo {
 	var (
-		ret SensorInfo
+		ret *SensorInfo
 		ok  bool
 	)
 
-	if ret, ok = c.compose.sensors[name]; !ok {
+	if ret, ok = c.compose.Sensors[name]; !ok {
 		return nil
 	}
-	return &ret
+	return ret
 }
 
 // Getter for Exporter
 func (c *composeFile) GetExporterCompose(name string) *ExporterInfo {
 	var (
-		ret ExporterInfo
+		ret *ExporterInfo
 		ok  bool
 	)
 
-	if ret, ok = c.compose.exporters[name]; !ok {
+	if ret, ok = c.compose.Exporters[name]; !ok {
 		return nil
 	}
-	return &ret
+	return ret
 }
 
 // Getter for Service
 func (c *composeFile) GetServiceCompose() *Service {
-	return c.compose.service
+	return c.compose.Service
 }
 
 // Stringer for ComposeFile
 func (c *composeFile) String() string {
 	sensorStr := "compose: \n-------------Sensor --------------\n"
-	for sensorName, sensor := range c.compose.sensors {
+	for sensorName, sensor := range c.compose.Sensors {
 		sensorStr += fmt.Sprintf("%s:\n\texec_path: %v\n\tparam: %s\n\trun_as_root: %v\n\tevents_header: %v\n", sensorName,
 			sensor.ExecPath,
 			sensor.Param,
@@ -79,16 +79,16 @@ func (c *composeFile) String() string {
 			sensor.EventsHeader)
 	}
 	exporterStr := "-------------Exporter --------------\n"
-	for exporterName, exporter := range c.compose.exporters {
+	for exporterName, exporter := range c.compose.Exporters {
 		exporterStr += fmt.Sprintf("%s:\n\tmode: %v\n\tdestination: %v\n\ttimeout: %v\n", exporterName, exporter.Mode, exporter.Destination, exporter.Timeout)
 	}
 	serviceStr := fmt.Sprintf("-------------Service --------------\n\tmachine: %v\n\tos: %v\n\tarch: %v\n\tgroup: %v\n\tdescription: %v",
-		c.compose.service.Machine,
-		c.compose.service.OS,
-		c.compose.service.Arch,
-		c.compose.service.Group,
-		c.compose.service.Description)
-	for pipeName, pipeline := range c.compose.service.Pipeline {
+		c.compose.Service.Machine,
+		c.compose.Service.OS,
+		c.compose.Service.Arch,
+		c.compose.Service.Group,
+		c.compose.Service.Description)
+	for pipeName, pipeline := range c.compose.Service.Pipeline {
 		serviceStr += fmt.Sprintf("\n\t%s:\n\t\t%s: %v", pipeName, "sensors", func() []string {
 			ret := make([]string, 0)
 			for _, sensor := range pipeline.Sensors {
@@ -96,13 +96,7 @@ func (c *composeFile) String() string {
 			}
 			return ret
 		}())
-		serviceStr += fmt.Sprintf("\n\t\t%s: %v", "exporters", func() []string {
-			ret := make([]string, 0)
-			for _, exporter := range pipeline.Exporters {
-				ret = append(ret, exporter.Name)
-			}
-			return ret
-		}())
+		serviceStr += fmt.Sprintf("\n\t\t%s: %v", "exporter", pipeline.Exporter.Name)
 	}
 	return sensorStr + exporterStr + serviceStr
 }
@@ -143,7 +137,7 @@ func NewComposeFile(composeFilePath string) (ComposeFile, error) {
 
 	newComp.compose = new(Compose)
 	// get sensor from wrapper
-	newComp.compose.sensors, err = newComp.getSensor(wrapper.Sensors)
+	newComp.compose.Sensors, err = newComp.getSensor(wrapper.Sensors)
 	if err != nil {
 		return nil, perror.PolvoComposeError{
 			Code:   perror.ErrInvalidCompose,
@@ -152,7 +146,7 @@ func NewComposeFile(composeFilePath string) (ComposeFile, error) {
 		}
 	}
 	// get exporter from wrapper
-	newComp.compose.exporters, err = newComp.getExporters(wrapper.Exporters)
+	newComp.compose.Exporters, err = newComp.getExporters(wrapper.Exporters)
 	if err != nil {
 		return nil, perror.PolvoComposeError{
 			Code:   perror.ErrInvalidCompose,
@@ -161,7 +155,7 @@ func NewComposeFile(composeFilePath string) (ComposeFile, error) {
 		}
 	}
 	// get service from wrapper
-	newComp.compose.service, err = newComp.getService(wrapper.Service)
+	newComp.compose.Service, err = newComp.getService(wrapper.Service)
 	if err != nil {
 		return nil, perror.PolvoComposeError{
 			Code:   perror.ErrInvalidCompose,
@@ -174,14 +168,14 @@ func NewComposeFile(composeFilePath string) (ComposeFile, error) {
 }
 
 // getSensor constructs Sensor struct from SensorWrapper & verifies the sensor compose file.
-func (c *composeFile) getSensor(wrapperMap map[string]SensorWrapper) (map[string]SensorInfo, error) {
+func (c *composeFile) getSensor(wrapperMap map[string]SensorWrapper) (map[string]*SensorInfo, error) {
 	var (
-		sensorMap    map[string]SensorInfo
+		sensorMap    map[string]*SensorInfo
 		execFileInfo os.FileInfo
 		err          error
 	)
 
-	sensorMap = make(map[string]SensorInfo)
+	sensorMap = make(map[string]*SensorInfo)
 
 	for sensorName, sensorObj := range wrapperMap {
 		// null check
@@ -224,7 +218,7 @@ func (c *composeFile) getSensor(wrapperMap map[string]SensorWrapper) (map[string
 			}
 		}
 		// add sensor
-		sensorMap[sensorName] = SensorInfo{
+		sensorMap[sensorName] = &SensorInfo{
 			Name:         sensorName,
 			ExecPath:     sensorObj.ExecPath,
 			Param:        sensorObj.Param,
@@ -276,8 +270,8 @@ func isValidPath(path string) (bool, error) {
 }
 
 // getExporter constructs Exporter struct from ExporterWrapper & verifies the exporter compose file.
-func (c *composeFile) getExporters(wrapperMap map[string]ExporterWrapper) (map[string]ExporterInfo, error) {
-	exporterMap := make(map[string]ExporterInfo)
+func (c *composeFile) getExporters(wrapperMap map[string]ExporterWrapper) (map[string]*ExporterInfo, error) {
+	exporterMap := make(map[string]*ExporterInfo)
 
 	for exporterName, exporterObj := range wrapperMap {
 		// null check
@@ -335,7 +329,7 @@ func (c *composeFile) getExporters(wrapperMap map[string]ExporterWrapper) (map[s
 			}
 		}
 		// add exporter to map
-		exporterMap[exporterName] = ExporterInfo{
+		exporterMap[exporterName] = &ExporterInfo{
 			Name:        exporterName,
 			Destination: exporterObj.Destination,
 			Timeout:     exporterObj.Timeout,
@@ -376,7 +370,6 @@ func (c *composeFile) getService(wrapper ServiceWrapper) (*Service, error) {
 	pipelines := make(map[string]PipelineInfo)
 	for pipeName, pipeline := range wrapper.Pipelines {
 		sensors := make([]*SensorInfo, 0)
-		exporters := make([]*ExporterInfo, 0)
 		// null check
 		if len(pipeline.Sensors) <= 0 {
 			return nil, perror.PolvoComposeError{
@@ -385,7 +378,7 @@ func (c *composeFile) getService(wrapper ServiceWrapper) (*Service, error) {
 				Origin: fmt.Errorf("%s's sensors is empty", pipeName),
 			}
 		}
-		if len(pipeline.Exporters) <= 0 {
+		if len(pipeline.Exporter) <= 0 {
 			return nil, perror.PolvoComposeError{
 				Code:   perror.InvalidServiceError,
 				Msg:    "error in getService.",
@@ -394,7 +387,7 @@ func (c *composeFile) getService(wrapper ServiceWrapper) (*Service, error) {
 		}
 		// check pipeline sensors & exporters are valid
 		for _, sensorName := range pipeline.Sensors {
-			sensor, ok := c.compose.sensors[sensorName]
+			sensor, ok := c.compose.Sensors[sensorName]
 			if !ok {
 				return nil, perror.PolvoComposeError{
 					Code:   perror.InvalidServiceError,
@@ -402,24 +395,21 @@ func (c *composeFile) getService(wrapper ServiceWrapper) (*Service, error) {
 					Origin: fmt.Errorf("%s's sensor %s is not defined", pipeName, sensorName),
 				}
 			}
-			sensors = append(sensors, &sensor)
+			sensors = append(sensors, sensor)
 		}
-		for _, exporterName := range pipeline.Exporters {
-			exporter, ok := c.compose.exporters[exporterName]
-			if !ok {
-				return nil, perror.PolvoComposeError{
-					Code:   perror.InvalidServiceError,
-					Msg:    "error in getService.",
-					Origin: fmt.Errorf("%s's exporter %s is not defined", pipeName, exporterName),
-				}
+		exporter, ok := c.compose.Exporters[pipeline.Exporter]
+		if !ok {
+			return nil, perror.PolvoComposeError{
+				Code:   perror.InvalidServiceError,
+				Msg:    "error in getService.",
+				Origin: fmt.Errorf("%s's exporter %s is not defined", pipeName, pipeline.Exporter),
 			}
-			exporters = append(exporters, &exporter)
 		}
 		// TODO: read valid exporter & sensor from config file
 		// add pipeline to map
 		pipelines[pipeName] = PipelineInfo{
-			Sensors:   sensors,
-			Exporters: exporters,
+			Sensors:  sensors,
+			Exporter: exporter,
 		}
 	}
 	// get machine from os
