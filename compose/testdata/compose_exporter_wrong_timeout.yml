@@ -19,6 +19,7 @@ sensors:
 
 exporters:
     exporter1:
+        mode: "network"
         destination: "localhost:4317"
         timeout: -5
 

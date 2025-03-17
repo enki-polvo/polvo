@@ -19,6 +19,7 @@ sensors:
 
 exporters:
     exporter1:
+        mode: "network"
         destination: "helloworld:2147483647"
         timeout: 5
 
