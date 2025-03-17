@@ -4,6 +4,7 @@ use (
 	.
 	./compose
 	./error
+	./exporter
 	./logger
 	./sensorPipe
 	./service
