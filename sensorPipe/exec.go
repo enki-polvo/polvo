@@ -9,7 +9,6 @@ import (
 	"sync"
 	"sync/atomic"
 	"syscall"
-	"time"
 
 	"golang.org/x/sync/errgroup"
 )
@@ -30,8 +29,8 @@ type promise struct {
 
 func Run(inStream *os.File, outStream *os.File, arg0 string, args ...string) (Promise, error) {
 	prom := new(promise)
-	// set the context timeout is 5 seconds
-	prom.ctx, prom.cancel = context.WithTimeout(context.Background(), 5*time.Second)
+	// set the context cancel function
+	prom.ctx, prom.cancel = context.WithCancel(context.Background())
 	// set conditional variable to -1
 	atomic.StoreInt32(&prom.waitCnt, -1)
 	// set the commandline
@@ -115,12 +114,25 @@ func (p *promise) Cancel() (err error) {
 		// }
 		//
 		// kill process by SIGKILL signal
-		p.cmd.Process.Signal(syscall.SIGKILL)
+		//
+		// p.cmd.Process.Signal(syscall.SIGKILL)
+		// p.cmd.Process.Kill()
+		p.cmd.Process.Signal(syscall.SIGINT)
+		p.cmd.Process.Signal(syscall.SIGTERM)
+
 		// wait to prevent zombie process
 		err = p.cmd.Wait()
 		// release the process resource
 		return p.cmd.Process.Release()
 	})
+	err = p.eg.Wait()
+	if err != nil {
+		return perror.PolvoGeneralError{
+			Code:   perror.SystemError,
+			Msg:    fmt.Sprintf("error while execute %s %v promise.Cancel()", p.cmd.Path, p.cmd.Args),
+			Origin: err,
+		}
+	}
 	// Do not wait killing goroutine here, because it will be handled in timeout context.
 	//
 	// // wait for the errgroup to finish killing the process
