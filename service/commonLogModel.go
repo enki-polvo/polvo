@@ -8,5 +8,6 @@ type CommonLogWrapper struct {
 	Log       string      `json:"log"`
 	MetaData  interface{} `json:"metadata"`
 	// Reference count is used to track the number of references to the log sync pool
-	RefCount int32 `json:"-"`
+	RefCount int32  `json:"-"`
+	Tag      string `json:"-"`
 }

@@ -1,0 +1,42 @@
+sensors:
+    dummy_sensor:
+        exec_path: ./testdata/dummy.sh
+        param: ""
+        run_as_root: true
+        events_header:
+            bashReadLine:
+                - "PID"
+                - "UID"
+                - "Username"
+                - "CommandLine"
+
+exporters:
+    file:
+        mode: "file"
+        destination: "./testdata/output.log"
+        timeout: 5
+    otel:
+        mode: "file"
+        destination: "./testdata/output2.log"
+        timeout: 5
+
+# filters:
+#     filter_agent:
+#         detection:
+#             filter_agent:
+#                 FileName|contains: "ebpf_sensor"
+#             filter_cmd:
+#                 CommandLine|endswith: "ebpf_sensor"
+#             condition: 1 of filter_*
+
+service:
+    description: "Sample test service"
+    group: "Sample group"
+    pipelines:
+        sample_pipe:
+            sensors: [dummy_sensor]
+            # filters: [filter_agent]
+            exporter: file
+        sample_2_pipe:
+            sensors: [dummy_sensor]
+            exporter: otel

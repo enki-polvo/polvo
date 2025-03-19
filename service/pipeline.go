@@ -28,6 +28,8 @@ type filterWorker struct {
 	inboundChannel <-chan *CommonLogWrapper
 	// outbound pipes
 	outboundChannel []chan<- *CommonLogWrapper
+	// wait group for filter thread
+	waitForEndRemainTasks sync.WaitGroup
 }
 
 func newFilterWorker(info *compose.SensorInfo, logChannel <-chan *CommonLogWrapper, outboundChan ...chan<- *CommonLogWrapper) *filterWorker {
@@ -61,6 +63,7 @@ func (w *filterWorker) Kill() error {
 	}
 	// cancel context to kill worker loop
 	w.cancel()
+	w.waitForEndRemainTasks.Wait()
 	atomic.StoreInt32(&w.isRunning, 0)
 	return nil
 }
@@ -76,6 +79,7 @@ func (w *filterWorker) filterThread() {
 		case <-w.ctx.Done():
 			return
 		case log = <-w.inboundChannel:
+			w.waitForEndRemainTasks.Add(1)
 			// process log
 			// TODO: filter log
 			// send to outbound channels
@@ -84,6 +88,7 @@ func (w *filterWorker) filterThread() {
 				atomic.AddInt32(&log.RefCount, 1)
 				outboundChannel <- log
 			}
+			w.waitForEndRemainTasks.Done()
 		}
 	}
 }
@@ -101,6 +106,8 @@ type processorWorker struct {
 	inboundChannel chan *CommonLogWrapper
 	// outbound pipes
 	outboundChannel chan<- *CommonLogWrapper
+	// wait group for processor thread
+	waitForEndRemainTasks sync.WaitGroup
 }
 
 func newProcessorWorker(name string, info *compose.PipelineInfo, exporterChan chan<- *CommonLogWrapper) *processorWorker {
@@ -140,6 +147,7 @@ func (p *processorWorker) Kill() error {
 	}
 	// cancel context to kill worker loop
 	p.cancel()
+	p.waitForEndRemainTasks.Wait()
 	atomic.StoreInt32(&p.isRunning, 0)
 	// close channel
 	close(p.inboundChannel)
@@ -147,20 +155,24 @@ func (p *processorWorker) Kill() error {
 }
 
 func (p *processorWorker) processorThread() {
-	var log *CommonLogWrapper
+	var (
+		log *CommonLogWrapper
+	)
 
 	for {
 		select {
 		case <-p.ctx.Done():
 			return
 		case log = <-p.inboundChannel:
-			fmt.Printf("Recv: %v\n", log)
+			p.waitForEndRemainTasks.Add(1)
+			// fmt.Printf("Processor %s\tRecv: %v\n", p.Name, log)
 			// TODO: process log
 			// send to outbound channels
 
 			// decrease ref count
 			atomic.AddInt32(&log.RefCount, -1)
 			p.outboundChannel <- log
+			p.waitForEndRemainTasks.Done()
 		}
 	}
 }
@@ -172,6 +184,7 @@ func (p *processorWorker) LogChannel() chan<- *CommonLogWrapper {
 type Service interface {
 	Start()
 	Stop() error
+	Wait()
 }
 
 type service struct {
@@ -205,7 +218,10 @@ func NewService(info *compose.Compose, loger plogger.PolvoLogger) (Service, erro
 	// init sync pool
 	sv.logWrapperPool = sync.Pool{
 		New: func() interface{} {
-			return new(CommonLogWrapper)
+			new := new(CommonLogWrapper)
+			new.RefCount = 0
+			new.Tag = "NEW"
+			return new
 		},
 	}
 
@@ -230,6 +246,12 @@ func NewService(info *compose.Compose, loger plogger.PolvoLogger) (Service, erro
 	for exporterName, exporterInfo := range info.Exporters {
 		// create exporter
 		switch exporterName {
+		case "kafka":
+			// TODO: create kafka exporter
+			fallthrough
+		case "otel":
+			// TODO: create otel exporter
+			fallthrough
 		case "file":
 			// create file exporter
 			exporter, err := exporter.NewFileExporter(
@@ -248,10 +270,6 @@ func NewService(info *compose.Compose, loger plogger.PolvoLogger) (Service, erro
 			}
 			// add to exporter map
 			sv.exporterMap[exporterInfo.Name] = exporter
-		case "kafka":
-			// TODO: create kafka exporter
-		case "otel":
-			// TODO: create otel exporter
 		default:
 			return nil, perror.PolvoPipelineError{
 				Code:   perror.ErrInvalidExporterName,
@@ -322,6 +340,7 @@ func (s *service) jsonUnMarshalFunc(log string) (*CommonLogWrapper, error) {
 
 func (s *service) jsonMarshalFunc(logWrapper *CommonLogWrapper) (ret []byte, err error) {
 	// Reason for control sync pool flow in pipeline is to prevent GC overhead in massive data processing
+
 	ret, err = json.Marshal(logWrapper)
 	if err != nil {
 		// if ref count is 0, it means this wrapper is unused. return to pool
@@ -337,6 +356,8 @@ func (s *service) jsonMarshalFunc(logWrapper *CommonLogWrapper) (ret []byte, err
 	// return to sync pool
 	// if ref count is 0, it means this wrapper is unused. return to pool
 	if atomic.LoadInt32(&logWrapper.RefCount) == 0 {
+		fmt.Printf("Finally Recv: %v\n", logWrapper)
+		logWrapper.Tag = "USED"
 		s.logWrapperPool.Put(logWrapper)
 	}
 	return ret, nil
@@ -391,13 +412,45 @@ func (s *service) Stop() error {
 					Msg:    "error while kill pipeline",
 				}
 			}
-			// stop sensor worker
-			s.filterWorkerMap[sensorInfo.Name].Kill()
+		}
+	}
+	// stop filter workers
+	for _, filterWorker := range s.filterWorkerMap {
+		err = filterWorker.Kill()
+		if err != nil {
+			if joinedErr != nil {
+				joinedErr = errors.Join(joinedErr, perror.PolvoPipelineError{
+					Code:   perror.ErrPipelineKill,
+					Origin: err,
+					Msg:    "error while kill pipeline",
+				})
+			} else {
+				joinedErr = perror.PolvoPipelineError{
+					Code:   perror.ErrPipelineKill,
+					Origin: err,
+					Msg:    "error while kill pipeline",
+				}
+			}
 		}
 	}
 	// stop processors
 	for _, processorWorker := range s.processorWorkerMap {
-		processorWorker.Kill()
+		err = processorWorker.Kill()
+		if err != nil {
+			if joinedErr != nil {
+				joinedErr = errors.Join(joinedErr, perror.PolvoPipelineError{
+					Code:   perror.ErrPipelineKill,
+					Origin: err,
+					Msg:    "error while kill pipeline",
+				})
+			} else {
+				joinedErr = perror.PolvoPipelineError{
+					Code:   perror.ErrPipelineKill,
+					Origin: err,
+					Msg:    "error while kill pipeline",
+				}
+			}
+		}
 	}
 	// stop exporters
 	for _, exporter := range s.exporterMap {
