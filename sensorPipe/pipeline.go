@@ -183,16 +183,10 @@ func (p *pipe[log]) Stop() (err error) {
 			Msg:    fmt.Sprintf("error while execute pipeline[%s].Close()", p.sensorName),
 		}
 	}
-	// wait until all logs are exported in logChannel
-	for {
-		if len(p.logChannel) == 0 {
-			break
-		}
-		time.Sleep(1 * time.Millisecond)
-	}
-	// close logChannel
-	close(p.logChannel)
-	p.logChannel = nil
+
+	// close logChannel with goroutine. wait until all logs are exported by filter worker thread.
+	go p.pipeCloser()
+
 	// set conditional variable to 1
 	atomic.AddInt32(&p.isClosed, 1)
 	p.promise = nil
@@ -226,6 +220,20 @@ func (p *pipe[log]) scannerThread() {
 		p.logger.PrintError("pipeline [%s] sensor: error while read from sensor. %s", p.sensorName, err.Error())
 	}
 	p.logger.PrintInfo("pipeline [%s]: scanner thread is closed", p.sensorName)
+}
+
+func (p *pipe[log]) pipeCloser() {
+	// wait until all logs are exported in logChannel
+	for {
+		if len(p.logChannel) == 0 {
+			break
+		}
+		time.Sleep(1 * time.Millisecond)
+	}
+	// close logChannel
+	close(p.logChannel)
+	p.logChannel = nil
+
 }
 
 func (p *pipe[logWrapper]) sensorThread(argv0 string, argv1 ...string) {
