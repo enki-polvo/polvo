@@ -30,6 +30,7 @@ type ComposeFile interface {
 	GetSensorCompose(name string) *SensorInfo
 	GetExporterCompose(name string) *ExporterInfo
 	GetServiceCompose() *Service
+	GetCompose() *Compose
 	String() string
 }
 
@@ -66,6 +67,11 @@ func (c *composeFile) GetExporterCompose(name string) *ExporterInfo {
 // Getter for Service
 func (c *composeFile) GetServiceCompose() *Service {
 	return c.compose.Service
+}
+
+// Getter for Compose
+func (c *composeFile) GetCompose() *Compose {
+	return c.compose
 }
 
 // Stringer for ComposeFile
