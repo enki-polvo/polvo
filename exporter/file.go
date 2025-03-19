@@ -7,7 +7,9 @@ import (
 	"polvo/compose"
 	perror "polvo/error"
 	plogger "polvo/logger"
+	"sync"
 	"sync/atomic"
+	"time"
 )
 
 type fileExporter[log any] struct {
@@ -22,6 +24,7 @@ type fileExporter[log any] struct {
 	// thread control
 	ctx      context.Context
 	cancel   context.CancelFunc
+	waitGrp  sync.WaitGroup
 	wrapFunc func(*log) ([]byte, error)
 	// conditional variable
 	isClosed  int32
@@ -67,6 +70,13 @@ func (fe *fileExporter[log]) Stop() error {
 			Msg:    fmt.Sprintf("error while execute pipeline[%s].Close()", fe.exporterName),
 		}
 	}
+	// wait until all logs are exported
+	for {
+		if len(fe.logChannel) == 0 {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
 	// cancel context
 	fe.cancel()
 	// close log channel
@@ -83,6 +93,10 @@ func (fe *fileExporter[log]) Stop() error {
 	// set conditional variable to 1
 	atomic.StoreInt32(&fe.isClosed, 1)
 	return nil
+}
+
+func (fe *fileExporter[log]) Wait() {
+	fe.waitGrp.Wait()
 }
 
 /************************************************************
@@ -154,6 +168,10 @@ func (fe *fileExporter[log]) exportThread() {
 		out        []byte
 		err        error
 	)
+	// wait group
+	fe.waitGrp.Add(1)
+	defer fe.waitGrp.Done()
+
 	for {
 		select {
 		case <-fe.ctx.Done():

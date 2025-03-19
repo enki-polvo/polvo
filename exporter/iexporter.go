@@ -6,5 +6,6 @@ type Exporter[log any] interface {
 	LogChannel() chan<- *log
 	// methods
 	Start()
+	Wait()
 	Stop() error
 }

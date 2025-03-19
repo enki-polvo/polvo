@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"polvo/compose"
 	perror "polvo/error"
@@ -12,6 +13,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 )
 
 type filterWorker struct {
@@ -50,6 +52,13 @@ func (w *filterWorker) Start() {
 }
 
 func (w *filterWorker) Kill() error {
+	// wait until all logs are processed
+	for {
+		if len(w.inboundChannel) == 0 {
+			break
+		}
+		time.Sleep(1 * time.Millisecond)
+	}
 	// cancel context to kill worker loop
 	w.cancel()
 	atomic.StoreInt32(&w.isRunning, 0)
@@ -122,6 +131,13 @@ func (p *processorWorker) Start() {
 }
 
 func (p *processorWorker) Kill() error {
+	// wait until all logs are processed
+	for {
+		if len(p.inboundChannel) == 0 {
+			break
+		}
+		time.Sleep(1 * time.Millisecond)
+	}
 	// cancel context to kill worker loop
 	p.cancel()
 	atomic.StoreInt32(&p.isRunning, 0)
@@ -153,7 +169,10 @@ func (p *processorWorker) LogChannel() chan<- *CommonLogWrapper {
 	return p.inboundChannel
 }
 
-type Service interface{}
+type Service interface {
+	Start()
+	Stop() error
+}
 
 type service struct {
 	// dependency injection
@@ -164,10 +183,10 @@ type service struct {
 	processorWorkerMap map[string]*processorWorker
 	sensorPipeMap      map[string]sensorPipe.Pipe[CommonLogWrapper]
 	exporterMap        map[string]exporter.Exporter[CommonLogWrapper]
-	// TODO: distributer will be added. distributer gets logs from filterworker and distribute to processorworkers.
-
 	// sync pool
 	logWrapperPool sync.Pool
+	// wait group
+	wg sync.WaitGroup
 }
 
 func NewService(info *compose.Compose, loger plogger.PolvoLogger) (Service, error) {
@@ -327,6 +346,7 @@ func (s *service) Start() {
 	// start exporters
 	for _, exporter := range s.exporterMap {
 		exporter.Start()
+		s.wg.Add(1)
 	}
 	// start processors
 	for _, processorWorker := range s.processorWorkerMap {
@@ -341,19 +361,38 @@ func (s *service) Start() {
 	}
 }
 
+func (s *service) Wait() {
+	s.wg.Wait()
+}
+
 func (s *service) Stop() error {
+	var (
+		err       error
+		joinedErr error
+	)
+
+	joinedErr = nil
+
 	// stop sensors & filter workers
 	for _, sensorInfo := range s.info.Sensors {
-		// stop sensor worker
-		s.filterWorkerMap[sensorInfo.Name].Kill()
 		// stop sensor
-		err := s.sensorPipeMap[sensorInfo.Name].Stop()
+		err = s.sensorPipeMap[sensorInfo.Name].Stop()
 		if err != nil {
-			return perror.PolvoPipelineError{
-				Code:   perror.ErrPipelineKill,
-				Origin: err,
-				Msg:    "error while kill pipeline",
+			if joinedErr != nil {
+				joinedErr = errors.Join(joinedErr, perror.PolvoPipelineError{
+					Code:   perror.ErrPipelineKill,
+					Origin: err,
+					Msg:    "error while kill pipeline",
+				})
+			} else {
+				joinedErr = perror.PolvoPipelineError{
+					Code:   perror.ErrPipelineKill,
+					Origin: err,
+					Msg:    "error while kill pipeline",
+				}
 			}
+			// stop sensor worker
+			s.filterWorkerMap[sensorInfo.Name].Kill()
 		}
 	}
 	// stop processors
@@ -362,14 +401,22 @@ func (s *service) Stop() error {
 	}
 	// stop exporters
 	for _, exporter := range s.exporterMap {
-		err := exporter.Stop()
+		err = exporter.Stop()
 		if err != nil {
-			return perror.PolvoPipelineError{
-				Code:   perror.ErrPipelineKill,
-				Origin: err,
-				Msg:    "error while kill pipeline",
+			if joinedErr != nil {
+				joinedErr = errors.Join(joinedErr, perror.PolvoPipelineError{
+					Code:   perror.ErrPipelineKill,
+					Origin: err,
+					Msg:    "error while kill pipeline",
+				})
+			} else {
+				joinedErr = perror.PolvoPipelineError{
+					Code:   perror.ErrPipelineKill,
+					Origin: err,
+					Msg:    "error while kill pipeline",
+				}
 			}
 		}
 	}
-	return nil
+	return joinedErr
 }

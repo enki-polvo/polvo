@@ -9,6 +9,7 @@ import (
 	plogger "polvo/logger"
 	"sync"
 	"sync/atomic"
+	"time"
 )
 
 type Pipe[log any] interface {
@@ -181,6 +182,13 @@ func (p *pipe[log]) Stop() (err error) {
 			Origin: err,
 			Msg:    fmt.Sprintf("error while execute pipeline[%s].Close()", p.sensorName),
 		}
+	}
+	// wait until all logs are exported in logChannel
+	for {
+		if len(p.logChannel) == 0 {
+			break
+		}
+		time.Sleep(1 * time.Millisecond)
 	}
 	// close logChannel
 	close(p.logChannel)
