@@ -82,6 +82,7 @@ func (w *filterWorker) filterThread() {
 			w.waitForEndRemainTasks.Add(1)
 			// process log
 			// TODO: filter log
+			// fmt.Printf("Filter Recv: %v\n", log)
 			// send to outbound channels
 			for _, outboundChannel = range w.outboundChannel {
 				// add ref count if log is sent to another worker
@@ -356,7 +357,7 @@ func (s *service) jsonMarshalFunc(logWrapper *CommonLogWrapper) (ret []byte, err
 	// return to sync pool
 	// if ref count is 0, it means this wrapper is unused. return to pool
 	if atomic.LoadInt32(&logWrapper.RefCount) == 0 {
-		fmt.Printf("Finally Recv: %v\n", logWrapper)
+		// fmt.Printf("Finally Recv: %v\n", logWrapper)
 		logWrapper.Tag = "USED"
 		s.logWrapperPool.Put(logWrapper)
 	}
@@ -470,6 +471,7 @@ func (s *service) Stop() error {
 				}
 			}
 		}
+		s.wg.Done()
 	}
 	return joinedErr
 }

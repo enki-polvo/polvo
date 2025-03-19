@@ -206,6 +206,7 @@ func (p *pipe[log]) scannerThread() {
 	// read from readStream
 	// write to logger
 	for p.scanner.Scan() {
+		// fmt.Printf("log: %v\n", p.scanner.Text())
 		lg, err = p.wrapFunc(p.scanner.Text())
 		if err != nil {
 			// if error while wrap log, just skip this log
@@ -213,6 +214,7 @@ func (p *pipe[log]) scannerThread() {
 			continue
 		}
 		// send log to pipeline
+		// fmt.Printf("log: %v\n", lg)
 		p.logChannel <- lg
 	}
 	if err = p.scanner.Err(); err != nil {
@@ -253,14 +255,15 @@ func (p *pipe[logWrapper]) sensorThread(argv0 string, argv1 ...string) {
 	p.logger.PrintInfo("pipeline [%s]: sensor thread is started", p.sensorName)
 	// blocked until sensor thread is finished
 	if err := p.promise.Wait(); err != nil {
-		p.logger.PrintError("pipeline [%s]: error while execute sensor[%s]. kill sensor...", p.sensorName, err.Error())
 		// kill process to prevent zombie process
 		err = p.Stop()
 		if err != nil {
 			// if error occurs, uncontrollable error. so panic
 			p.logger.PrintError("pipeline [%s]: error while stop sensor[%s]. panic...", p.sensorName, err.Error())
+			// TODO: handle panic
 			return
 		}
+		p.logger.PrintError("pipeline [%s]: error while execute sensor[%s]. kill sensor...", p.sensorName, err.Error())
 	}
 	p.logger.PrintInfo("pipeline [%s]: sensor thread is closed", p.sensorName)
 }

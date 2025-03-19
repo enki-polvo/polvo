@@ -1,28 +1,51 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"os"
-	_ "polvo/logger"
-	_ "polvo/sensorPipe"
+	"os/signal"
+	"path/filepath"
+	"polvo/compose"
+	plogger "polvo/logger"
+	"polvo/service"
+	"syscall"
 )
 
 func main() {
-	// var (
-	// 	pipe pipeline.Pipeline
-	// 	err  error
-	// )
+	var (
+		loger    plogger.PolvoLogger
+		composer compose.ComposeFile
+		svc      service.Service
+	)
 
-	// pipe, err = pipeline.NewPipeline("sensor")
-	// if err != nil {
-	// 	panic(err)
-	// }
-	// pipe.Start()
-	// pipe.Stop()
-	hostname, err := os.Hostname()
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	pwd, err := os.Getwd()
 	if err != nil {
+		fmt.Printf("error while get working directory %v", err)
+		os.Exit(1)
+	}
+	loger = plogger.NewLogger(pwd)
+	composer, err = compose.NewComposeFile(filepath.Join(pwd, os.Args[1]))
+	if err != nil {
+		loger.Close()
 		panic(err)
 	}
-	fmt.Println(hostname)
-	fmt.Println("hello world")
+	svc, err = service.NewService(composer.GetCompose(), loger)
+	if err != nil {
+		loger.Close()
+		panic(err)
+	}
+	svc.Start()
+
+	go func() {
+		<-ctx.Done()
+		svc.Stop()
+		fmt.Println("Shutting down...")
+	}()
+	svc.Wait()
+	fmt.Println("Service stopped")
+	loger.Close()
 }

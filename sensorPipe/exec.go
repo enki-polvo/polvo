@@ -37,7 +37,7 @@ func Run(inStream *os.File, outStream *os.File, arg0 string, args ...string) (Pr
 	prom.cmd = *exec.CommandContext(prom.ctx, arg0, args...)
 	prom.cmd.Stdin = inStream
 	prom.cmd.Stdout = outStream
-	// prom.cmd.Stderr = outStream
+	prom.cmd.Stderr = os.Stderr
 
 	// init once object for wait
 	prom.waitOnce = sync.Once{}
@@ -71,7 +71,21 @@ func (p *promise) Wait() (err error) {
 	}
 	// set the conditional variable to 1
 	atomic.StoreInt32(&p.waitCnt, 1)
-	p.cmd.Process.Wait()
+	state, err := p.cmd.Process.Wait()
+	if err != nil {
+		return perror.PolvoGeneralError{
+			Code:   perror.SystemError,
+			Msg:    fmt.Sprintf("error while execute %s %v promise.Wait()", p.cmd.Path, p.cmd.Args),
+			Origin: err,
+		}
+	}
+	if !state.Success() {
+		return perror.PolvoGeneralError{
+			Code:   perror.SystemError,
+			Msg:    fmt.Sprintf("error while execute %s %v promise.Wait()", p.cmd.Path, p.cmd.Args),
+			Origin: fmt.Errorf("process is not success"),
+		}
+	}
 	// Do not check error here, because it will be handled in SIGKILL signal
 	//
 	// _, err = p.cmd.Process.Wait()
@@ -86,6 +100,8 @@ func (p *promise) Wait() (err error) {
 }
 
 func (p *promise) Cancel() (err error) {
+	var processErr error
+
 	if p.cancel == nil {
 		return perror.PolvoGeneralError{
 			Code:   perror.InvalidOperationError,
@@ -121,7 +137,7 @@ func (p *promise) Cancel() (err error) {
 		p.cmd.Process.Signal(syscall.SIGTERM)
 
 		// wait to prevent zombie process
-		err = p.cmd.Wait()
+		processErr = p.cmd.Wait()
 		// release the process resource
 		return p.cmd.Process.Release()
 	})
@@ -131,6 +147,13 @@ func (p *promise) Cancel() (err error) {
 			Code:   perror.SystemError,
 			Msg:    fmt.Sprintf("error while execute %s %v promise.Cancel()", p.cmd.Path, p.cmd.Args),
 			Origin: err,
+		}
+	}
+	if processErr != nil {
+		return perror.PolvoGeneralError{
+			Code:   perror.SystemError,
+			Msg:    fmt.Sprintf("error while execute %s %v promise.Cancel()", p.cmd.Path, p.cmd.Args),
+			Origin: processErr,
 		}
 	}
 	// Do not wait killing goroutine here, because it will be handled in timeout context.

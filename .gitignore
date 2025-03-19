@@ -1,2 +1,6 @@
 # binary
 polvo
+# sensors
+sensors/*
+# logs
+*.log
