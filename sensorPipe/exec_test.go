@@ -29,20 +29,46 @@ func TestPromiseError(t *testing.T) {
 	t.Errorf("Error should have been raised")
 }
 
-/**********************************************************************************
-* Deprecated because struct is now private and cannot be accessed without Constructor
-**********************************************************************************/
+func TestPromiseWaitAfterCancel(t *testing.T) {
+	promise, err := sensorPipe.Run(os.Stdin, os.Stdout, "echo", "hello")
+	if err != nil {
+		t.Errorf("Error while executing promise %v", err)
+		return
+	}
+	err = promise.Cancel()
+	if err != nil {
+		t.Errorf("Error while executing promise %v", err)
+		return
+	}
+	err = promise.Wait()
+	if err == nil {
+		t.Errorf("Error should have been raised")
+		return
+	}
+	t.Logf("Error: %v", err)
+}
 
+// (Deprecated)
+// Because of sensors will not use stdin, this test is deprecated.
+//
 // func TestPromiseInput(t *testing.T) {
-// 	promise := sensorPipe.Run(os.Stdin, os.Stdout, "man", "watch")
-// 	err := promise.Wait()
+// 	promise, err := sensorPipe.Run(os.Stdin, os.Stdout, "man", "watch")
+// 	if err != nil {
+// 		t.Errorf("Error while executing promise %v", err)
+// 		return
+// 	}
+// 	err = promise.Wait()
 // 	if err != nil {
 // 		t.Errorf("Error while executing promise %v", err)
 // 	}
 // }
 
+/**********************************************************************************
+* Deprecated because struct is now private and cannot be accessed without Constructor
+**********************************************************************************/
+
 // func TestWaitBeforePromise(t *testing.T) {
-// 	promise := new(exec.Promise)
+// 	promise := new(sensorPipe.Promise)
 // 	err := promise.Wait()
 // 	if err == nil {
 // 		t.Errorf("Error should have been raised")

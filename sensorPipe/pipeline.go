@@ -10,14 +10,22 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"golang.org/x/sync/errgroup"
 )
 
+// # Pipe
+//
+// Pipe runs the sensor as a subprocess and loads the output values ​​into a channel.
+// It provides a way to start and stop the sensor and get the output values.
+// The values ​​are preprocessed using wrapFunc.
 type Pipe[log any] interface {
 	// Getter & Setter
 	Name() string
 	LogChannel() <-chan *log
 	// methods
-	Start(string, ...string)
+	Start(string, ...string) error
+	Wait() error
 	Stop() error
 }
 
@@ -29,18 +37,26 @@ type pipe[log any] struct {
 	writeStream *os.File
 	scanner     *bufio.Scanner
 	// thread control
-	ctx    context.Context
-	cancel context.CancelFunc
+	ctx context.Context
+	eg  *errgroup.Group
 	// wait group for scanner thread print all logs before close
 	waitScanner sync.WaitGroup
 	wrapFunc    func(string) (*log, error)
 	promise     Promise
 	// conditional variable
-	isClosed int32
+	isStarted  int32
+	isClosed   int32
+	waitBefore int32
 	// dependency
 	logger plogger.PolvoLogger
 }
 
+// # NewPipe
+//
+// NewPipe creates a new pipeline with the given sensor name, maximum size, logger, and wrapFunc.
+// Maximum size is the maximum number of logs that can be stored in the logChannel.
+// 0 means no limit.
+// WrapFunc is a function that converts the log string to the desired log structure.
 func NewPipe[log any](
 	sensorName string,
 	maxSize uint,
@@ -70,13 +86,16 @@ func NewPipe[log any](
 	}
 	newPipe.sensorName = sensorName
 	newPipe.scanner = bufio.NewScanner(newPipe.readStream)
-	newPipe.ctx, newPipe.cancel = context.WithCancel(context.Background())
+	// init thread control
+	newPipe.eg, newPipe.ctx = errgroup.WithContext(context.Background())
 	// init waitGroup
 	newPipe.waitScanner = sync.WaitGroup{}
 	newPipe.promise = nil
 	newPipe.wrapFunc = wrapFunc
 	// set conditional variable to 0
 	atomic.StoreInt32(&newPipe.isClosed, 0)
+	atomic.StoreInt32(&newPipe.isStarted, 0)
+	atomic.StoreInt32(&newPipe.waitBefore, 0)
 	// set dependencies
 	newPipe.logger = logger
 	return newPipe, nil
@@ -127,18 +146,40 @@ func (p *pipe[log]) LogChannel() <-chan *log {
 * Pipeline methods
 ****************************************************/
 
-func (p *pipe[log]) Start(arg0 string, arg1 ...string) {
+// # Start
+//
+// Start starts the sensor and scanner threads.
+// It returns an error if the sensor is already started.
+func (p *pipe[log]) Start(arg0 string, arg1 ...string) error {
+	// prevent duplicated sensor thread
+	if atomic.LoadInt32(&p.isStarted) > 0 || p.promise != nil {
+		return perror.PolvoPipelineError{
+			Code:   perror.ErrSensorExecute,
+			Origin: fmt.Errorf("sensor is already started"),
+			Msg:    fmt.Sprintf("error while execute pipeline[%s].Start()", p.sensorName),
+		}
+	}
 	// start scanner thread
+	// scannerThread is not managed by errgroup because it will be terminated by EOF.
 	go p.scannerThread()
+
 	// start sensor thread
-	go p.sensorThread(arg0, arg1...)
+	p.eg.Go(func() error {
+		return p.sensorThread(arg0, arg1...)
+	})
 	// set conditional variable to 0
 	atomic.AddInt32(&p.isClosed, 0)
+	atomic.AddInt32(&p.isStarted, 1)
+	return nil
 }
 
+// # Stop
+//
+// Stop stops the sensor and scanner threads.
+// It will not be blocked until all logs are exported by the filter worker thread.
+// Instead, pipeCloser goroutine will be called to close the logChannel. pipeCloser will be blocked by live lock until all logs are exported.
 func (p *pipe[log]) Stop() (err error) {
 	// stop sensor thread
-
 	// prevent Call Stop() before Start()
 	if p.promise == nil {
 		return perror.PolvoGeneralError{
@@ -164,7 +205,7 @@ func (p *pipe[log]) Stop() (err error) {
 		}
 	}
 	// send EOF to writeStream
-	err = p.writeStream.Close()
+	err = p.flushStreams()
 	if err != nil {
 		return perror.PolvoPipelineError{
 			Code:   perror.ErrSensorPanic,
@@ -172,7 +213,62 @@ func (p *pipe[log]) Stop() (err error) {
 			Msg:    fmt.Sprintf("error while execute pipeline[%s].Close()", p.sensorName),
 		}
 	}
-	// wait for scanner thread to Flush
+	// set conditional variable to 1
+	atomic.AddInt32(&p.isClosed, 1)
+	p.promise = nil
+	return nil
+}
+
+// # Wait
+//
+// Wait waits for the sensor and scanner threads to finish.
+func (p *pipe[log]) Wait() error {
+	if atomic.LoadInt32(&p.isClosed) > 0 || atomic.LoadInt32(&p.isStarted) != 1 {
+		return perror.PolvoGeneralError{
+			Code:   perror.InvalidOperationError,
+			Origin: fmt.Errorf("pipeline is not started"),
+			Msg:    fmt.Sprintf("error while execute pipeline[%s].Wait()", p.sensorName),
+		}
+	}
+	// check duplicated wait
+	if atomic.LoadInt32(&p.waitBefore) > 0 {
+		return perror.PolvoGeneralError{
+			Code:   perror.InvalidOperationError,
+			Origin: fmt.Errorf("pipeline is already waited"),
+			Msg:    fmt.Sprintf("error while execute pipeline[%s].Wait()", p.sensorName),
+		}
+	}
+	// set conditional variable to 1
+	atomic.AddInt32(&p.waitBefore, 1)
+	err := p.eg.Wait()
+	if err != nil {
+		return perror.PolvoPipelineError{
+			Code:   perror.ErrSensorPanic,
+			Origin: err,
+			Msg:    fmt.Sprintf("error while wait for pipeline[%s]", p.sensorName),
+		}
+	}
+	return nil
+}
+
+/****************************************************
+* goroutines & private methods
+****************************************************/
+
+// # flushStreams
+//
+// flush stream generates EOF, ensuring termination of the scanner thread and closing the file stream.
+func (p *pipe[log]) flushStreams() error {
+	// send EOF to writeStream
+	err := p.writeStream.Close()
+	if err != nil {
+		return perror.PolvoPipelineError{
+			Code:   perror.ErrSensorPanic,
+			Origin: err,
+			Msg:    fmt.Sprintf("error while execute pipeline[%s].streamCloser", p.sensorName),
+		}
+	}
+	// wait until scanner thread is finished
 	p.waitScanner.Wait()
 	// close readStream
 	err = p.readStream.Close()
@@ -180,20 +276,13 @@ func (p *pipe[log]) Stop() (err error) {
 		return perror.PolvoPipelineError{
 			Code:   perror.ErrSensorPanic,
 			Origin: err,
-			Msg:    fmt.Sprintf("error while execute pipeline[%s].Close()", p.sensorName),
+			Msg:    fmt.Sprintf("error while execute pipeline[%s].streamCloser", p.sensorName),
 		}
 	}
-
-	// close logChannel with goroutine. wait until all logs are exported by filter worker thread.
-	go p.pipeCloser()
-
-	// set conditional variable to 1
-	atomic.AddInt32(&p.isClosed, 1)
-	p.promise = nil
 	return nil
 }
 
-func (p *pipe[log]) scannerThread() {
+func (p *pipe[log]) scannerThread() error {
 	var (
 		lg  *log
 		err error
@@ -206,7 +295,6 @@ func (p *pipe[log]) scannerThread() {
 	// read from readStream
 	// write to logger
 	for p.scanner.Scan() {
-		// fmt.Printf("log: %v\n", p.scanner.Text())
 		lg, err = p.wrapFunc(p.scanner.Text())
 		if err != nil {
 			// if error while wrap log, just skip this log
@@ -214,7 +302,6 @@ func (p *pipe[log]) scannerThread() {
 			continue
 		}
 		// send log to pipeline
-		// fmt.Printf("log: %v\n", lg)
 		p.logChannel <- lg
 	}
 	if err = p.scanner.Err(); err != nil {
@@ -222,10 +309,59 @@ func (p *pipe[log]) scannerThread() {
 		p.logger.PrintError("pipeline [%s] sensor: error while read from sensor. %s", p.sensorName, err.Error())
 	}
 	p.logger.PrintInfo("pipeline [%s]: scanner thread is closed", p.sensorName)
+	fmt.Fprintf(os.Stderr, "scannerThread is closed\n")
+	return nil
 }
 
-func (p *pipe[log]) pipeCloser() {
+func (p *pipe[logWrapper]) sensorThread(argv0 string, argv1 ...string) error {
+	var err error
+	// execute sensor
+	p.promise, err = Run(os.Stdin, p.writeStream, argv0, argv1...)
+	if err != nil {
+		// if error occurs, uncontrollable error. so panic
+		p.logger.PrintError("failed to start pipeline [%s]: %v", p.sensorName, err)
+		return perror.PolvoPipelineError{
+			Code:   perror.ErrSensorExecute,
+			Origin: err,
+			Msg:    fmt.Sprintf("error in sensor[%s] thread", p.sensorName),
+		}
+	}
+	p.logger.PrintInfo("pipeline [%s]: sensor thread is started", p.sensorName)
+	// blocked until sensor thread is finished
+	if err := p.promise.Wait(); err != nil {
+		// (DEPRECATED)
+		// if error returned from Wait(), it means that subprocess returns exitcode and already released.
+		//
+		// // kill process to prevent zombie process
+		// err = p.Stop()
+		// if err != nil {
+		// 	// if error occurs, uncontrollable error. so panic
+		// 	p.logger.PrintError("pipeline [%s]: error while stop sensor[%s]. panic...", p.sensorName, err.Error())
+		// 	return
+		// }
+
+		// wait until all logs are exported in logChannel
+		// This is useless live lock. Because in golang, channel can pop data when it is closed.
+		// So, this is just for safety.
+		p.logger.PrintError("pipeline [%s]: error while sensor running... Error: %v", p.sensorName, err.Error())
+		for {
+			if len(p.logChannel) == 0 {
+				break
+			}
+			time.Sleep(1 * time.Millisecond)
+		}
+		// close logChannel
+		close(p.logChannel)
+		return perror.PolvoPipelineError{
+			Code:   perror.ErrSensorPanic,
+			Origin: err,
+			Msg:    fmt.Sprintf("error in sensor[%s] thread", p.sensorName),
+		}
+	}
+	p.logger.PrintInfo("pipeline [%s]: sensor thread is closed", p.sensorName)
 	// wait until all logs are exported in logChannel
+	// This is useless live lock. Because in golang, channel can pop data when it is closed.
+	// So, this is just for safety.
 	for {
 		if len(p.logChannel) == 0 {
 			break
@@ -234,36 +370,5 @@ func (p *pipe[log]) pipeCloser() {
 	}
 	// close logChannel
 	close(p.logChannel)
-	p.logChannel = nil
-
-}
-
-func (p *pipe[logWrapper]) sensorThread(argv0 string, argv1 ...string) {
-	var err error
-	// execute sensor
-	// prevent duplicated sensor thread
-	if p.promise != nil {
-		return
-	}
-	// run sensor
-	p.promise, err = Run(os.Stdin, p.writeStream, argv0, argv1...)
-	if err != nil {
-		// if error occurs, uncontrollable error. so panic
-		p.logger.PrintError("failed to start pipeline [%s]: %v", p.sensorName, err)
-		panic(err)
-	}
-	p.logger.PrintInfo("pipeline [%s]: sensor thread is started", p.sensorName)
-	// blocked until sensor thread is finished
-	if err := p.promise.Wait(); err != nil {
-		// kill process to prevent zombie process
-		err = p.Stop()
-		if err != nil {
-			// if error occurs, uncontrollable error. so panic
-			p.logger.PrintError("pipeline [%s]: error while stop sensor[%s]. panic...", p.sensorName, err.Error())
-			// TODO: handle panic
-			return
-		}
-		p.logger.PrintError("pipeline [%s]: error while execute sensor[%s]. kill sensor...", p.sensorName, err.Error())
-	}
-	p.logger.PrintInfo("pipeline [%s]: sensor thread is closed", p.sensorName)
+	return nil
 }

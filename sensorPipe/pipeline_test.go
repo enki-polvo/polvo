@@ -28,7 +28,6 @@ func Wrap(log string) (*Samplelog, error) {
 var (
 	pwd     string
 	loger   plogger.PolvoLogger
-	pipe    sensorPipe.Pipe[Samplelog]
 	logpath string
 )
 
@@ -44,11 +43,6 @@ func TestMain(m *testing.M) {
 	}
 	logpath = filepath.Join(pwd, "testdata")
 	loger = plogger.NewLogger(logpath)
-	pipe, err = sensorPipe.NewPipe("sensor", 0, loger, Wrap)
-	if err != nil {
-		fmt.Printf("error while create pipeline %v", err)
-		os.Exit(1)
-	}
 	// run tests
 	code := m.Run()
 	// teardown
@@ -58,14 +52,76 @@ func TestMain(m *testing.M) {
 }
 
 func TestPipelineLoop100(t *testing.T) {
-	// pipe.Start(filepath.Join(pwd, "testdata", "sensor-ebpf"), "--events=\"all\"")
+	pipe, err := sensorPipe.NewPipe("sensor", 0, loger, Wrap)
+	if err != nil {
+		fmt.Printf("error while create pipeline %v", err)
+		os.Exit(1)
+	}
 	pipe.Start(filepath.Join(pwd, "testdata", "dummy.sh"))
 	for i := 0; i < 100; i++ {
-		log := <-pipe.LogChannel()
-		t.Logf("log: %v", *log)
+		<-pipe.LogChannel()
+		// t.Logf("log: %v", *log)
 	}
-	err := pipe.Stop()
+	err = pipe.Stop()
 	if err != nil {
 		t.Errorf("Error while stopping pipeline %v", err)
 	}
+}
+
+func TestPipelineWaitReturnsError(t *testing.T) {
+	pipe, err := sensorPipe.NewPipe("sensor", 0, loger, Wrap)
+	if err != nil {
+		fmt.Printf("error while create pipeline %v", err)
+		os.Exit(1)
+	}
+	err = pipe.Start(filepath.Join(pwd, "testdata", "dummy_fail.sh"))
+	if err != nil {
+		t.Errorf("Error while starting pipeline %v", err)
+		return
+	}
+	defer pipe.Stop()
+
+	go func() {
+		for _ = range pipe.LogChannel() {
+			// t.Logf("log: %v", *log)
+		}
+	}()
+
+	err = pipe.Wait()
+	if err == nil {
+		t.Errorf("Error should raised in waiting pipeline %v", err)
+	}
+	t.Logf("Error: %v", err)
+}
+
+func TestPipelineStartDuplicated(t *testing.T) {
+	pipe, err := sensorPipe.NewPipe("sensor", 0, loger, Wrap)
+	if err != nil {
+		fmt.Printf("error while create pipeline %v", err)
+		os.Exit(1)
+	}
+	err = pipe.Start(filepath.Join(pwd, "testdata", "dummy.sh"))
+	if err != nil {
+		t.Errorf("Error while starting pipeline %v", err)
+		return
+	}
+	defer pipe.Stop()
+	err = pipe.Start(filepath.Join(pwd, "testdata", "dummy.sh"))
+	if err == nil {
+		t.Errorf("Error should have been raised")
+	}
+	t.Logf("Error: %v", err)
+}
+
+func TestPipelineStopBeforeStart(t *testing.T) {
+	pipe, err := sensorPipe.NewPipe("sensor", 0, loger, Wrap)
+	if err != nil {
+		fmt.Printf("error while create pipeline %v", err)
+		os.Exit(1)
+	}
+	err = pipe.Stop()
+	if err == nil {
+		t.Errorf("Error should have been raised")
+	}
+	t.Logf("Error: %v", err)
 }

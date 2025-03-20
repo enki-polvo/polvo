@@ -6,41 +6,40 @@ import (
 	"os"
 	"os/exec"
 	perror "polvo/error"
-	"sync"
 	"sync/atomic"
 	"syscall"
+	"time"
 
 	"golang.org/x/sync/errgroup"
 )
 
+// # Promise
+//
+// Promise calls an external program as a subprocess and manages it asynchronously.
+// It provides a way to wait for the subprocess to finish or cancel it.
 type Promise interface {
 	Wait() error
 	Cancel() error
 }
 
 type promise struct {
-	ctx      context.Context
-	cancel   context.CancelFunc
-	cmd      exec.Cmd
-	eg       *errgroup.Group
-	waitOnce sync.Once
-	waitCnt  int32
+	cmd     exec.Cmd
+	eg      *errgroup.Group
+	waitCnt int32
 }
 
+// # Run
+//
+// Run starts a new subprocess with the given commandline and returns a Promise.
 func Run(inStream *os.File, outStream *os.File, arg0 string, args ...string) (Promise, error) {
 	prom := new(promise)
-	// set the context cancel function
-	prom.ctx, prom.cancel = context.WithCancel(context.Background())
 	// set conditional variable to -1
 	atomic.StoreInt32(&prom.waitCnt, -1)
 	// set the commandline
-	prom.cmd = *exec.CommandContext(prom.ctx, arg0, args...)
+	prom.cmd = *exec.Command(arg0, args...)
 	prom.cmd.Stdin = inStream
 	prom.cmd.Stdout = outStream
 	prom.cmd.Stderr = os.Stderr
-
-	// init once object for wait
-	prom.waitOnce = sync.Once{}
 
 	// generate process group
 	prom.cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
@@ -59,10 +58,15 @@ func Run(inStream *os.File, outStream *os.File, arg0 string, args ...string) (Pr
 	return prom, nil
 }
 
+// # Wait
+//
+// Wait waits for the subprocess to finish and returns an error if the subprocess is not successful.
+// Wait should be called only once and it will return an error if it is called multiple times.
+// Also, it will return an error if it is called before Run.
 func (p *promise) Wait() (err error) {
 	// if conditional variable is not set to 0, return error
 	val := atomic.LoadInt32(&p.waitCnt)
-	if val < 0 || val > 0 {
+	if val != 0 {
 		return perror.PolvoGeneralError{
 			Code:   perror.InvalidOperationError,
 			Msg:    fmt.Sprintf("error while execute %s %v promise.Wait()", p.cmd.Path, p.cmd.Args),
@@ -83,32 +87,18 @@ func (p *promise) Wait() (err error) {
 		return perror.PolvoGeneralError{
 			Code:   perror.SystemError,
 			Msg:    fmt.Sprintf("error while execute %s %v promise.Wait()", p.cmd.Path, p.cmd.Args),
-			Origin: fmt.Errorf("process is not success"),
+			Origin: fmt.Errorf("process is not success. Exitcode(%v)", state.ExitCode()),
 		}
 	}
-	// Do not check error here, because it will be handled in SIGKILL signal
-	//
-	// _, err = p.cmd.Process.Wait()
-	// if err != nil {
-	// 	return perror.PolvoGeneralError{
-	// 		Code:   perror.InvalidOperationError,
-	// 		Msg:    fmt.Sprintf("error while execute %s %v promise.Wait()", p.cmd.Path, p.cmd.Args),
-	// 		Origin: err,
-	// 	}
-	// }
 	return nil
 }
 
+// # Cancel
+//
+// Cancel sends a signal to the subprocess to kill it.
+// It will return an error if the subprocess is not initialized.
+// It will be blocked until the subprocess is killed and release the resource.
 func (p *promise) Cancel() (err error) {
-	var processErr error
-
-	if p.cancel == nil {
-		return perror.PolvoGeneralError{
-			Code:   perror.InvalidOperationError,
-			Msg:    "error while execute promise.Cancel()",
-			Origin: fmt.Errorf("cancel is called while promise is not initialized"),
-		}
-	}
 	if atomic.LoadInt32(&p.waitCnt) < 0 {
 		return perror.PolvoGeneralError{
 			Code:   perror.InvalidOperationError,
@@ -116,31 +106,17 @@ func (p *promise) Cancel() (err error) {
 			Origin: fmt.Errorf("cancel is called while promise is not initialized [%d]", atomic.LoadInt32(&p.waitCnt)),
 		}
 	}
-	p.eg, _ = errgroup.WithContext(p.ctx)
+
+	// create timeout context for killing subprocesskiller with timeout.
+	// if the subprocesskiller is not killed in the timeout, the subprocesskiller will be killed by the parent process.
+	subProcessKillerCtx, subProcessKillerCancel := context.WithDeadline(context.TODO(), time.Now().Add(5*time.Second))
+	defer subProcessKillerCancel()
+	p.eg, _ = errgroup.WithContext(subProcessKillerCtx)
+	// send signal to subprocesskiller
 	p.eg.Go(func() error {
-
-		// kill proc group
-		//
-		// (DEPRECATED) kill process group
-		//
-		// pgid, err := syscall.Getpgid(p.cmd.Process.Pid)
-		// if err == nil {
-		// 	fmt.Fprintf(os.Stderr, "Killing process group %d\n", pgid)
-		// 	syscall.Kill(-pgid, syscall.SIGKILL)
-		// }
-		//
-		// kill process by SIGKILL signal
-		//
-		// p.cmd.Process.Signal(syscall.SIGKILL)
-		// p.cmd.Process.Kill()
-		p.cmd.Process.Signal(syscall.SIGINT)
-		p.cmd.Process.Signal(syscall.SIGTERM)
-
-		// wait to prevent zombie process
-		processErr = p.cmd.Wait()
-		// release the process resource
-		return p.cmd.Process.Release()
+		return p.subProcessKiller()
 	})
+
 	err = p.eg.Wait()
 	if err != nil {
 		return perror.PolvoGeneralError{
@@ -149,24 +125,37 @@ func (p *promise) Cancel() (err error) {
 			Origin: err,
 		}
 	}
-	if processErr != nil {
+	return nil
+}
+
+func (p *promise) subProcessKiller() error {
+	// kill proc group
+	//
+	// (DEPRECATED) kill process group
+	//
+	// pgid, err := syscall.Getpgid(p.cmd.Process.Pid)
+	// if err == nil {
+	// 	fmt.Fprintf(os.Stderr, "Killing process group %d\n", pgid)
+	// 	syscall.Kill(-pgid, syscall.SIGKILL)
+	// }
+	//
+	// kill process by SIGKILL signal
+	//
+	// p.cmd.Process.Kill()
+
+	p.cmd.Process.Signal(syscall.SIGINT)
+	p.cmd.Process.Signal(syscall.SIGTERM)
+
+	// wait to prevent zombie process
+	p.cmd.Wait()
+	err := p.cmd.Process.Release()
+	if err != nil {
 		return perror.PolvoGeneralError{
 			Code:   perror.SystemError,
-			Msg:    fmt.Sprintf("error while execute %s %v promise.Cancel()", p.cmd.Path, p.cmd.Args),
-			Origin: processErr,
+			Msg:    fmt.Sprintf("error while execute %s %v in subProcessKiller", p.cmd.Path, p.cmd.Args),
+			Origin: err,
 		}
 	}
-	// Do not wait killing goroutine here, because it will be handled in timeout context.
-	//
-	// // wait for the errgroup to finish killing the process
-	// err = p.eg.Wait()
-	// if err != nil {
-	// 	p.cancel()
-	// 	return perror.PolvoGeneralError{
-	// 		Code:   perror.InvalidOperationError,
-	// 		Msg:    fmt.Sprintf("error while execute %s %v promise.Cancel()", p.cmd.Path, p.cmd.Args),
-	// 		Origin: err,
-	// 	}
-	// }
+	// release the process resource
 	return nil
 }
