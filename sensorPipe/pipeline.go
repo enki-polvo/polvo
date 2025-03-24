@@ -48,6 +48,7 @@ type pipe[log any] struct {
 	isStarted int32
 	isClosed  int32
 	waitCount int32
+	procExit  int32
 	// dependency
 	logger plogger.PolvoLogger
 }
@@ -99,6 +100,7 @@ func NewPipe[log any](
 	atomic.StoreInt32(&newPipe.isClosed, 0)
 	atomic.StoreInt32(&newPipe.isStarted, 0)
 	atomic.StoreInt32(&newPipe.waitCount, 0)
+	atomic.StoreInt32(&newPipe.procExit, 0)
 	// set dependencies
 	newPipe.logger = logger
 	return newPipe, nil
@@ -193,12 +195,15 @@ func (p *pipe[log]) Stop() (err error) {
 			Msg:    fmt.Sprintf("error while execute pipeline[%s].Stop()", p.sensorName),
 		}
 	}
-	err = p.promise.Cancel()
-	if err != nil {
-		return perror.PolvoPipelineError{
-			Code:   perror.ErrSensorPanic,
-			Origin: err,
-			Msg:    fmt.Sprintf("error while execute pipeline[%s].Stop()", p.sensorName),
+	// prevent call stop when sensor is already stopped
+	if atomic.LoadInt32(&p.procExit) <= 0 {
+		err = p.promise.Cancel()
+		if err != nil {
+			return perror.PolvoPipelineError{
+				Code:   perror.ErrSensorPanic,
+				Origin: err,
+				Msg:    fmt.Sprintf("error while execute pipeline[%s].Stop()", p.sensorName),
+			}
 		}
 	}
 	// check if console is already closed
@@ -335,6 +340,8 @@ func (p *pipe[logWrapper]) sensorThread(argv0 string, argv1 ...string) error {
 	p.logger.PrintInfo("pipeline [%s]: sensor thread is started", p.sensorName)
 	// blocked until sensor thread is finished
 	exitCode, err := p.promise.Wait()
+	defer atomic.StoreInt32(&p.procExit, 1)
+
 	if err != nil {
 		// (DEPRECATED)
 		// if error returned from Wait(), it means that subprocess returns exitcode and already released.
@@ -354,6 +361,7 @@ func (p *pipe[logWrapper]) sensorThread(argv0 string, argv1 ...string) error {
 		}
 	}
 	if exitCode != 0 {
+		// store exitcode
 		p.logger.PrintError("pipeline [%s]: sensor thread returns error. exit code: %d", p.sensorName, exitCode)
 		return perror.PolvoPipelineError{
 			Code:   perror.ErrSensorPanic,

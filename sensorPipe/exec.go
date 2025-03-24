@@ -104,7 +104,6 @@ func (p *promise) Cancel() (err error) {
 			Origin: fmt.Errorf("cancel is called while promise is not initialized [%d]", atomic.LoadInt32(&p.waitCnt)),
 		}
 	}
-
 	// create timeout context for killing subprocesskiller with timeout.
 	// if the subprocesskiller is not killed in the timeout, the subprocesskiller will be killed by the parent process.
 	subProcessKillerCtx, subProcessKillerCancel := context.WithDeadline(context.TODO(), time.Now().Add(5*time.Second))
