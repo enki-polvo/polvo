@@ -6,8 +6,16 @@ type PolvoErrPipeline int
 
 const (
 	ErrInvalidSensorName PolvoErrPipeline = iota
+	ErrSensorCreate
 	ErrSensorExecute
 	ErrSensorPanic
+	ErrInvalidPipelineCompose
+	ErrPipelineKill
+	ErrPipelineWait
+	ErrPipelineUnmarshal
+	ErrPipelineMarshal
+	ErrInvalidExporterName
+	ErrExporterCreate
 )
 
 type PolvoPipelineError struct {

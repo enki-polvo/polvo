@@ -1,5 +1,21 @@
 package compose
 
+type ExporterMode []string
+
+var AvailableExporterMode ExporterMode = ExporterMode{
+	"file",
+	"network",
+}
+
+func (em ExporterMode) IsValid(mode string) bool {
+	for _, m := range em {
+		if m == mode {
+			return true
+		}
+	}
+	return false
+}
+
 type SensorWrapper struct {
 	ExecPath     string              `yaml:"exec_path"`
 	Param        string              `yaml:"param"`
@@ -8,13 +24,14 @@ type SensorWrapper struct {
 }
 
 type ExporterWrapper struct {
+	Mode        string `yaml:"mode"`
 	Destination string `yaml:"destination"`
 	Timeout     int    `yaml:"timeout"`
 }
 
 type PipelineWrapper struct {
-	Sensors   []string `yaml:"sensors"`
-	Exporters []string `yaml:"exporters"`
+	Sensors  []string `yaml:"sensors"`
+	Exporter string   `yaml:"exporter"`
 }
 
 type ServiceWrapper struct {
@@ -30,35 +47,36 @@ type ComposeWrapper struct {
 }
 
 type Compose struct {
-	sensors   map[string]Sensor
-	exporters map[string]Exporter
-	service   *Service
+	Sensors   map[string]*SensorInfo
+	Exporters map[string]*ExporterInfo
+	Service   *Service
 }
 
 type Service struct {
-	machine     string
-	os          string
-	arch        string
-	group       string
-	description string
-	pipeline    map[string]Pipeline
+	Machine     string
+	OS          string
+	Arch        string
+	Group       string
+	Description string
+	Pipeline    map[string]PipelineInfo
 }
 
-type Pipeline struct {
-	sensors   []*Sensor
-	exporters []*Exporter
+type PipelineInfo struct {
+	Sensors  []*SensorInfo
+	Exporter *ExporterInfo
 }
 
-type Sensor struct {
+type SensorInfo struct {
 	Name         string
-	execPath     string
-	param        string
-	runAsRoot    bool
-	eventsHeader map[string][]string
+	ExecPath     string
+	Param        string
+	RunAsRoot    bool
+	EventsHeader map[string][]string
 }
 
-type Exporter struct {
+type ExporterInfo struct {
 	Name        string
-	destination string
-	timeout     int
+	Mode        string
+	Destination string
+	Timeout     int
 }

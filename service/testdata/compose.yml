@@ -1,7 +1,7 @@
 sensors:
-    sensor1:
-        exec_path: ./testdata/sensor_sample
-        param: --events="bashReadLine,vfsOpen"
+    dummy_sensor:
+        exec_path: ./testdata/dummy.sh
+        param: ""
         run_as_root: true
         events_header:
             bashReadLine:
@@ -9,18 +9,15 @@ sensors:
                 - "UID"
                 - "Username"
                 - "CommandLine"
-            vfsOpen:
-                - "PID"
-                - "UID"
-                - "Username"
-                - "Fullpath"
-                - "Flags"
-                - "FlagsInterpretation"
 
 exporters:
-    exporter1:
-        mode: "network"
-        destination: "helloworld:2147483647"
+    file:
+        mode: "file"
+        destination: "./testdata/output.log"
+        timeout: 5
+    otel:
+        mode: "file"
+        destination: "./testdata/output2.log"
         timeout: 5
 
 # filters:
@@ -36,10 +33,10 @@ service:
     description: "Sample test service"
     group: "Sample group"
     pipelines:
-        trace_pipe:
-            sensors: [sensor1]
+        sample_pipe:
+            sensors: [dummy_sensor]
             # filters: [filter_agent]
-            exporter: exporter1
-        log_pipe:
-            sensors: [sensor1]
-            exporter: exporter1
+            exporter: file
+        sample_2_pipe:
+            sensors: [dummy_sensor]
+            exporter: otel

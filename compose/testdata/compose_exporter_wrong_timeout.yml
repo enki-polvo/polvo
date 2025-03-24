@@ -19,6 +19,7 @@ sensors:
 
 exporters:
     exporter1:
+        mode: "network"
         destination: "localhost:4317"
         timeout: -5
 
@@ -38,7 +39,7 @@ service:
         trace_pipe:
             sensors: [sensor1]
             # filters: [filter_agent]
-            exporters: [exporter1]
+            exporter: exporter1
         log_pipe:
             sensors: [sensor1]
-            exporters: [exporter1]
+            exporter: exporter1

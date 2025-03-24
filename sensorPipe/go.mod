@@ -1,4 +1,4 @@
-module polvo/pipeline
+module polvo/sensorPipe
 
 go 1.23.3
 
