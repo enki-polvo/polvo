@@ -22,7 +22,6 @@ import (
 type Pipe[log any] interface {
 	// Getter & Setter
 	Name() string
-	LogChannel() <-chan *log
 	IsRunning() bool
 	// methods
 	Start(string, ...string) error
@@ -32,7 +31,7 @@ type Pipe[log any] interface {
 
 type pipe[log any] struct {
 	sensorName string
-	logChannel chan *log
+	logChannel chan<- *log
 	// stream
 	readStream  *os.File
 	writeStream *os.File
@@ -62,7 +61,7 @@ type pipe[log any] struct {
 func NewPipe[log any](
 	sensorName string,
 	logger plogger.PolvoLogger,
-	logChannel chan *log,
+	logChannel chan<- *log,
 	wrapFunc func(string) (*log, error)) (Pipe[log], error) {
 
 	var err error
@@ -133,10 +132,6 @@ func (p *pipe[log]) openPipeStream() (err error) {
 
 func (p *pipe[log]) Name() string {
 	return p.sensorName
-}
-
-func (p *pipe[log]) LogChannel() <-chan *log {
-	return p.logChannel
 }
 
 func (p *pipe[log]) IsRunning() bool {
@@ -339,7 +334,8 @@ func (p *pipe[logWrapper]) sensorThread(argv0 string, argv1 ...string) error {
 	p.pid = p.promise.Pid()
 	p.logger.PrintInfo("pipeline [%s]: sensor thread is started", p.sensorName)
 	// blocked until sensor thread is finished
-	if err := p.promise.Wait(); err != nil {
+	exitCode, err := p.promise.Wait()
+	if err != nil {
 		// (DEPRECATED)
 		// if error returned from Wait(), it means that subprocess returns exitcode and already released.
 		//
@@ -350,11 +346,18 @@ func (p *pipe[logWrapper]) sensorThread(argv0 string, argv1 ...string) error {
 		// 	p.logger.PrintError("pipeline [%s]: error while stop sensor[%s]. panic...", p.sensorName, err.Error())
 		// 	return
 		// }
-
 		p.logger.PrintError("pipeline [%s]: error while sensor running... Error: %v", p.sensorName, err.Error())
 		return perror.PolvoPipelineError{
 			Code:   perror.ErrSensorPanic,
 			Origin: err,
+			Msg:    fmt.Sprintf("error in sensor[%s] thread", p.sensorName),
+		}
+	}
+	if exitCode != 0 {
+		p.logger.PrintError("pipeline [%s]: sensor thread returns error. exit code: %d", p.sensorName, exitCode)
+		return perror.PolvoPipelineError{
+			Code:   perror.ErrSensorPanic,
+			Origin: fmt.Errorf("sensor returns error. exit code: %d", exitCode),
 			Msg:    fmt.Sprintf("error in sensor[%s] thread", p.sensorName),
 		}
 	}

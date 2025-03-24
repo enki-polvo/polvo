@@ -14,7 +14,7 @@ func TestPromise(t *testing.T) {
 		t.Errorf("Error while executing promise %v", err)
 		return
 	}
-	err = promise.Wait()
+	_, err = promise.Wait()
 	if err != nil {
 		t.Errorf("Error while executing promise %v", err)
 	}
@@ -40,7 +40,7 @@ func TestPromiseWaitAfterCancel(t *testing.T) {
 		t.Errorf("Error while executing promise %v", err)
 		return
 	}
-	err = promise.Wait()
+	_, err = promise.Wait()
 	if err == nil {
 		t.Errorf("Error should have been raised")
 		return
@@ -91,12 +91,12 @@ func TestWaitFuncCallDuplicated(t *testing.T) {
 		t.Errorf("Error while executing promise %v", err)
 		return
 	}
-	err = promise.Wait()
+	_, err = promise.Wait()
 	if err != nil {
 		t.Errorf("Error while executing promise %v", err)
 		return
 	}
-	err = promise.Wait()
+	_, err = promise.Wait()
 	if err == nil {
 		t.Errorf("Error should have been raised when calling Wait() twice")
 	}

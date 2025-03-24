@@ -19,7 +19,7 @@ import (
 // It provides a way to wait for the subprocess to finish or cancel it.
 type Promise interface {
 	Pid() int
-	Wait() error
+	Wait() (int, error)
 	Cancel() error
 }
 
@@ -68,11 +68,11 @@ func Run(inStream *os.File, outStream *os.File, arg0 string, args ...string) (Pr
 // Wait waits for the subprocess to finish and returns an error if the subprocess is not successful.
 // Wait should be called only once and it will return an error if it is called multiple times.
 // Also, it will return an error if it is called before Run.
-func (p *promise) Wait() (err error) {
+func (p *promise) Wait() (exitCode int, err error) {
 	// if conditional variable is not set to 0, return error
 	val := atomic.LoadInt32(&p.waitCnt)
 	if val != 0 {
-		return perror.PolvoGeneralError{
+		return -1, perror.PolvoGeneralError{
 			Code:   perror.InvalidOperationError,
 			Msg:    fmt.Sprintf("error while execute %s %v promise.Wait()", p.cmd.Path, p.cmd.Args),
 			Origin: fmt.Errorf("wait is called while promise is not initialized [%d]", atomic.LoadInt32(&p.waitCnt)),
@@ -82,20 +82,13 @@ func (p *promise) Wait() (err error) {
 	atomic.StoreInt32(&p.waitCnt, 1)
 	state, err := p.cmd.Process.Wait()
 	if err != nil {
-		return perror.PolvoGeneralError{
+		return -1, perror.PolvoGeneralError{
 			Code:   perror.SystemError,
 			Msg:    fmt.Sprintf("error while execute %s %v promise.Wait()", p.cmd.Path, p.cmd.Args),
 			Origin: err,
 		}
 	}
-	if !state.Success() {
-		return perror.PolvoGeneralError{
-			Code:   perror.SystemError,
-			Msg:    fmt.Sprintf("error while execute %s %v promise.Wait()", p.cmd.Path, p.cmd.Args),
-			Origin: fmt.Errorf("process is not success. Exitcode(%v)", state.ExitCode()),
-		}
-	}
-	return nil
+	return state.ExitCode(), nil
 }
 
 // # Cancel
