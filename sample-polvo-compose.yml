@@ -1,6 +1,6 @@
 sensors:
     ebpf_sensor:
-        exec_path: ./sensors/ebpf
+        exec_path: /home/shhong/Desktop/POLVO/polvo/sensors/ebpf
         param: -events=all
         run_as_root: true
         events_header:

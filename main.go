@@ -12,6 +12,24 @@ import (
 	"syscall"
 )
 
+const logo = "         _nnnn_                      \n" +
+	"        dGGGGMMb     ,\"\"\"\"\"\"\"\"\"\"\"\"\".\n" +
+	"       @p~qp~~qMb    | Polvo LINUX! |\n" +
+	"       M|@||@) M|   _;..............'\n" +
+	"       @,----.JM| -'\n" +
+	"      JS^\\\\__/  qKL\n" +
+	"     dZP        qKRb\n" +
+	"    dZP          qKKb\n" +
+	"   fZP            SMMb\n" +
+	"   HZM            MMMM\n" +
+	"   FqM            MMMM\n" +
+	" __| \\\".        |\\\\dS\\\"qML\n" +
+	" |    `.       | `' \\\\Zq\n" +
+	"_)      \\\\.___.,|     .'\n" +
+	"\\\\____   )MMMMMM|   .'\n" +
+	"     `-'       `--' ascii by hjm\n" +
+	"[Polvo_0.0.0 - ENKI WHITEHAT 2025]\n\n"
+
 func main() {
 	var (
 		loger    plogger.PolvoLogger
@@ -42,10 +60,22 @@ func main() {
 
 	go func() {
 		<-ctx.Done()
-		svc.Stop()
 		fmt.Println("Shutting down...")
+		err = svc.Stop()
+		if err != nil {
+			fmt.Printf("error while stop service %v", err)
+		}
 	}()
-	svc.Wait()
+
+	// print logo
+	fmt.Print(logo)
+
+	err = svc.Wait()
+	if err != nil {
+		fmt.Printf("error while waiting service %v", err)
+		// call stop to ensure all resources are released
+		stop()
+	}
 	fmt.Println("Service stopped")
 	loger.Close()
 }
