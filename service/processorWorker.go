@@ -93,6 +93,7 @@ func (p *processorWorker) processorThread() {
 			// In Processor Worker, we can process log with multiple sensors.
 			// Process Function chain will be added here.
 			// e.g. parser, signature detect, etc.
+			// fmt.Fprintf(os.Stderr, "Processor Worker[%s] received log from Filter Worker[%s]\n", p.Name, log.Tag)
 
 			// decrease ref count
 			atomic.AddInt32(&log.RefCount, -1)

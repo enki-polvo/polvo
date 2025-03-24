@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -12,12 +13,14 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+
+	"golang.org/x/sync/errgroup"
 )
 
 type Service interface {
 	Start()
 	Stop() error
-	Wait()
+	Wait() error
 }
 
 type service struct {
@@ -32,7 +35,9 @@ type service struct {
 	// sync pool
 	logWrapperPool sync.Pool
 	// wait group
-	wg sync.WaitGroup
+	sensorGroup *errgroup.Group
+	ctx         context.Context
+	wg          sync.WaitGroup
 }
 
 func NewService(info *compose.Compose, loger plogger.PolvoLogger) (Service, error) {
@@ -57,6 +62,8 @@ func NewService(info *compose.Compose, loger plogger.PolvoLogger) (Service, erro
 			return new
 		},
 	}
+	// init error group
+	sv.sensorGroup, sv.ctx = errgroup.WithContext(context.Background())
 
 	// create exporter pipes
 	for exporterName, exporterInfo := range info.Exporters {
@@ -94,22 +101,8 @@ func NewService(info *compose.Compose, loger plogger.PolvoLogger) (Service, erro
 			}
 		}
 	}
-
-	// create filter workers & sensorPipe per sensor pipeline
+	// make pipemap
 	for _, sensorInfo := range info.Sensors {
-		// create filter workers
-		sv.filterWorkerMap[sensorInfo.Name] = newFilterWorker(sensorInfo, pipeMap[sensorInfo.Name]...)
-		// create worker per sensor
-		sensorPipe, err := sensorPipe.NewPipe(sensorInfo.Name, loger, sv.filterWorkerMap[sensorInfo.Name].LogChannel(), sv.jsonUnMarshalFunc)
-		if err != nil {
-			return nil, perror.PolvoPipelineError{
-				Code:   perror.ErrSensorCreate,
-				Origin: err,
-				Msg:    "error while construct new pipeline",
-			}
-		}
-		sv.sensorPipeMap[sensorInfo.Name] = sensorPipe
-		// add to pipe map
 		pipeMap[sensorInfo.Name] = make([]chan<- *CommonLogWrapper, 0)
 	}
 
@@ -132,6 +125,22 @@ func NewService(info *compose.Compose, loger plogger.PolvoLogger) (Service, erro
 		for _, sensorInfo := range pipelineInfo.Sensors {
 			pipeMap[sensorInfo.Name] = append(pipeMap[sensorInfo.Name], processorWorker.LogChannel())
 		}
+	}
+
+	// create filter workers & sensorPipe per sensor pipeline
+	for _, sensorInfo := range info.Sensors {
+		// create filter workers
+		sv.filterWorkerMap[sensorInfo.Name] = newFilterWorker(sensorInfo, pipeMap[sensorInfo.Name]...)
+		// create worker per sensor
+		sensorPipe, err := sensorPipe.NewPipe(sensorInfo.Name, loger, sv.filterWorkerMap[sensorInfo.Name].LogChannel(), sv.jsonUnMarshalFunc)
+		if err != nil {
+			return nil, perror.PolvoPipelineError{
+				Code:   perror.ErrSensorCreate,
+				Origin: err,
+				Msg:    "error while construct new pipeline",
+			}
+		}
+		sv.sensorPipeMap[sensorInfo.Name] = sensorPipe
 	}
 	return sv, nil
 }
@@ -174,7 +183,7 @@ func (s *service) jsonMarshalFunc(logWrapper *CommonLogWrapper) (ret []byte, err
 	// return to sync pool
 	// if ref count is 0, it means this wrapper is unused. return to pool
 	if atomic.LoadInt32(&logWrapper.RefCount) == 0 {
-		fmt.Printf("Finally Recv: %v\n", logWrapper)
+		// fmt.Printf("Finally Recv: %v\n", logWrapper)
 		logWrapper.Tag = "USED"
 		s.logWrapperPool.Put(logWrapper)
 	}
@@ -200,8 +209,29 @@ func (s *service) Start() {
 	}
 }
 
-func (s *service) Wait() {
+func (s *service) Wait() error {
+	var err error
+
+	// register sensorWait to sensorGroup
+	for _, sensorInfo := range s.info.Sensors {
+		s.sensorGroup.Go(func() error {
+			return s.sensorPipeMap[sensorInfo.Name].Wait()
+		})
+	}
+
+	err = s.sensorGroup.Wait()
+	if err != nil {
+		s.logger.PrintError("error while wait sensor", err)
+		return perror.PolvoPipelineError{
+			Code:   perror.ErrPipelineWait,
+			Origin: err,
+			Msg:    "error while wait sensor",
+		}
+	}
+	// wait for all workers
 	s.wg.Wait()
+
+	return nil
 }
 
 func (s *service) Stop() error {
