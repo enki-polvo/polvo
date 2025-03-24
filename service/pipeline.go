@@ -1,7 +1,6 @@
 package service
 
 import (
-	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -13,174 +12,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
-	"time"
 )
-
-type filterWorker struct {
-	// status variables & context
-	isRunning int32
-	ctx       context.Context
-	cancel    context.CancelFunc
-	// dependency injection
-	info        *compose.SensorInfo // TODO: processor info will be added.
-	eventHeader map[string][]string
-	// sensor pipe
-	inboundChannel <-chan *CommonLogWrapper
-	// outbound pipes
-	outboundChannel []chan<- *CommonLogWrapper
-	// wait group for filter thread
-	waitForEndRemainTasks sync.WaitGroup
-}
-
-func newFilterWorker(info *compose.SensorInfo, logChannel <-chan *CommonLogWrapper, outboundChan ...chan<- *CommonLogWrapper) *filterWorker {
-	nw := new(filterWorker)
-
-	// dependency injection
-	nw.info = info
-	nw.eventHeader = info.EventsHeader
-	// context
-	nw.ctx, nw.cancel = context.WithCancel(context.Background())
-	// set channels
-	nw.inboundChannel = logChannel
-	nw.outboundChannel = make([]chan<- *CommonLogWrapper, 0)
-	nw.outboundChannel = append(nw.outboundChannel, outboundChan...)
-	// init sync pool
-	return nw
-}
-
-func (w *filterWorker) Start() {
-	atomic.StoreInt32(&w.isRunning, 1)
-	go w.filterThread()
-}
-
-func (w *filterWorker) Kill() error {
-	// wait until all logs are processed
-	for {
-		if len(w.inboundChannel) == 0 {
-			break
-		}
-		time.Sleep(1 * time.Millisecond)
-	}
-	// cancel context to kill worker loop
-	w.cancel()
-	w.waitForEndRemainTasks.Wait()
-	atomic.StoreInt32(&w.isRunning, 0)
-	return nil
-}
-
-func (w *filterWorker) filterThread() {
-	var (
-		log             *CommonLogWrapper
-		outboundChannel chan<- *CommonLogWrapper
-	)
-
-	for {
-		select {
-		case <-w.ctx.Done():
-			return
-		case log = <-w.inboundChannel:
-			w.waitForEndRemainTasks.Add(1)
-			// process log
-			// TODO: filter log
-			// fmt.Printf("Filter Recv: %v\n", log)
-			// send to outbound channels
-			for _, outboundChannel = range w.outboundChannel {
-				// add ref count if log is sent to another worker
-				atomic.AddInt32(&log.RefCount, 1)
-				outboundChannel <- log
-			}
-			w.waitForEndRemainTasks.Done()
-		}
-	}
-}
-
-type processorWorker struct {
-	Name string
-	// status variables & context
-	isRunning int32
-	ctx       context.Context
-	cancel    context.CancelFunc
-	// dependency injection
-	info                 *compose.PipelineInfo // TODO: processor info will be added.
-	eventHeaderPerSensor map[string]map[string][]string
-	// sensor pipe
-	inboundChannel chan *CommonLogWrapper
-	// outbound pipes
-	outboundChannel chan<- *CommonLogWrapper
-	// wait group for processor thread
-	waitForEndRemainTasks sync.WaitGroup
-}
-
-func newProcessorWorker(name string, info *compose.PipelineInfo, exporterChan chan<- *CommonLogWrapper) *processorWorker {
-	nw := new(processorWorker)
-
-	// set name
-	nw.Name = name
-	nw.eventHeaderPerSensor = make(map[string]map[string][]string)
-	// dependency injection
-	nw.info = info
-	// context
-	nw.ctx, nw.cancel = context.WithCancel(context.Background())
-	// set event headers
-	for _, sensorInfo := range nw.info.Sensors {
-		// set event headers
-		nw.eventHeaderPerSensor[sensorInfo.Name] = sensorInfo.EventsHeader
-	}
-	// set channel
-	nw.inboundChannel = make(chan *CommonLogWrapper)
-	nw.outboundChannel = exporterChan
-	// init sync pool
-	return nw
-}
-
-func (p *processorWorker) Start() {
-	atomic.StoreInt32(&p.isRunning, 1)
-	go p.processorThread()
-}
-
-func (p *processorWorker) Kill() error {
-	// wait until all logs are processed
-	for {
-		if len(p.inboundChannel) == 0 {
-			break
-		}
-		time.Sleep(1 * time.Millisecond)
-	}
-	// cancel context to kill worker loop
-	p.cancel()
-	p.waitForEndRemainTasks.Wait()
-	atomic.StoreInt32(&p.isRunning, 0)
-	// close channel
-	close(p.inboundChannel)
-	return nil
-}
-
-func (p *processorWorker) processorThread() {
-	var (
-		log *CommonLogWrapper
-	)
-
-	for {
-		select {
-		case <-p.ctx.Done():
-			return
-		case log = <-p.inboundChannel:
-			p.waitForEndRemainTasks.Add(1)
-			// fmt.Printf("Processor %s\tRecv: %v\n", p.Name, log)
-			// TODO: process log
-			// send to outbound channels
-
-			// decrease ref count
-			atomic.AddInt32(&log.RefCount, -1)
-			p.outboundChannel <- log
-			p.waitForEndRemainTasks.Done()
-		}
-	}
-}
-
-func (p *processorWorker) LogChannel() chan<- *CommonLogWrapper {
-	return p.inboundChannel
-}
 
 type Service interface {
 	Start()
@@ -226,23 +58,6 @@ func NewService(info *compose.Compose, loger plogger.PolvoLogger) (Service, erro
 		},
 	}
 
-	// create sensor pipes
-	for _, sensorInfo := range info.Sensors {
-		// create worker per sensor
-		sensorPipe, err := sensorPipe.NewPipe(sensorInfo.Name, 0, loger, sv.jsonUnMarshalFunc)
-		if err != nil {
-			return nil, perror.PolvoPipelineError{
-				Code:   perror.ErrSensorCreate,
-				Origin: err,
-				Msg:    "error while construct new pipeline",
-			}
-		}
-		sv.sensorPipeMap[sensorInfo.Name] = sensorPipe
-
-		// add to pipe map
-		pipeMap[sensorInfo.Name] = make([]chan<- *CommonLogWrapper, 0)
-	}
-
 	// create exporter pipes
 	for exporterName, exporterInfo := range info.Exporters {
 		// create exporter
@@ -280,6 +95,24 @@ func NewService(info *compose.Compose, loger plogger.PolvoLogger) (Service, erro
 		}
 	}
 
+	// create filter workers & sensorPipe per sensor pipeline
+	for _, sensorInfo := range info.Sensors {
+		// create filter workers
+		sv.filterWorkerMap[sensorInfo.Name] = newFilterWorker(sensorInfo, pipeMap[sensorInfo.Name]...)
+		// create worker per sensor
+		sensorPipe, err := sensorPipe.NewPipe(sensorInfo.Name, loger, sv.filterWorkerMap[sensorInfo.Name].LogChannel(), sv.jsonUnMarshalFunc)
+		if err != nil {
+			return nil, perror.PolvoPipelineError{
+				Code:   perror.ErrSensorCreate,
+				Origin: err,
+				Msg:    "error while construct new pipeline",
+			}
+		}
+		sv.sensorPipeMap[sensorInfo.Name] = sensorPipe
+		// add to pipe map
+		pipeMap[sensorInfo.Name] = make([]chan<- *CommonLogWrapper, 0)
+	}
+
 	// create processor workers per pipeline
 	for pipelineName, pipelineInfo := range info.Service.Pipeline {
 		// create worker per pipeline
@@ -300,22 +133,6 @@ func NewService(info *compose.Compose, loger plogger.PolvoLogger) (Service, erro
 			pipeMap[sensorInfo.Name] = append(pipeMap[sensorInfo.Name], processorWorker.LogChannel())
 		}
 	}
-
-	// create filter workers per sensor pipeline
-	for _, sensorInfo := range info.Sensors {
-		// create worker per sensor
-		sensorPipe, ok := sv.sensorPipeMap[sensorInfo.Name]
-		if !ok {
-			return nil, perror.PolvoPipelineError{
-				Code:   perror.ErrSensorCreate,
-				Origin: fmt.Errorf("sensor %s not found", sensorInfo.Name),
-				Msg:    "error while construct new pipeline",
-			}
-		}
-		// create filter workers
-		sv.filterWorkerMap[sensorInfo.Name] = newFilterWorker(sensorInfo, sensorPipe.LogChannel(), pipeMap[sensorInfo.Name]...)
-	}
-
 	return sv, nil
 }
 
@@ -357,7 +174,7 @@ func (s *service) jsonMarshalFunc(logWrapper *CommonLogWrapper) (ret []byte, err
 	// return to sync pool
 	// if ref count is 0, it means this wrapper is unused. return to pool
 	if atomic.LoadInt32(&logWrapper.RefCount) == 0 {
-		// fmt.Printf("Finally Recv: %v\n", logWrapper)
+		fmt.Printf("Finally Recv: %v\n", logWrapper)
 		logWrapper.Tag = "USED"
 		s.logWrapperPool.Put(logWrapper)
 	}
