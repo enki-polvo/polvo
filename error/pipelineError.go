@@ -11,6 +11,7 @@ const (
 	ErrSensorPanic
 	ErrInvalidPipelineCompose
 	ErrPipelineKill
+	ErrPipelineWait
 	ErrPipelineUnmarshal
 	ErrPipelineMarshal
 	ErrInvalidExporterName
