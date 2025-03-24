@@ -18,6 +18,7 @@ import (
 // Promise calls an external program as a subprocess and manages it asynchronously.
 // It provides a way to wait for the subprocess to finish or cancel it.
 type Promise interface {
+	Pid() int
 	Wait() error
 	Cancel() error
 }
@@ -26,6 +27,10 @@ type promise struct {
 	cmd     exec.Cmd
 	eg      *errgroup.Group
 	waitCnt int32
+}
+
+func (p *promise) Pid() int {
+	return p.cmd.Process.Pid
 }
 
 // # Run
