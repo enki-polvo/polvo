@@ -17,6 +17,10 @@ import (
 	"golang.org/x/sync/errgroup"
 )
 
+// # Service
+//
+// Service is an interface that corresponds to Service in the compose file.
+// Service reflects the pipeline structure of the data flow from the sensor to the exporter.
 type Service interface {
 	Start()
 	Stop() error
@@ -40,21 +44,23 @@ type service struct {
 	wg          sync.WaitGroup
 }
 
+// NewService creates a new service with the given compose file and logger.
+// Initialize sequence is as follows:
+// 1. Create service struct & maps to control workers.
+// 2. Create exporter.
+// 3. Create processor workers per pipeline.
+// 4. Create filter workers & sensorPipe per sensor pipeline.
+// Stop function operates in the opposite order.
 func NewService(info *compose.Compose, loger plogger.PolvoLogger) (Service, error) {
-	pipeMap := make(map[string][]chan<- *CommonLogWrapper)
 	// create service
-	sv := new(service)
+	svc := new(service)
 
 	// dependency injection
-	sv.logger = loger
-	sv.info = info
-	// create maps
-	sv.filterWorkerMap = make(map[string]*filterWorker)
-	sv.processorWorkerMap = make(map[string]*processorWorker)
-	sv.sensorPipeMap = make(map[string]sensorPipe.Pipe[CommonLogWrapper])
-	sv.exporterMap = make(map[string]exporter.Exporter[CommonLogWrapper])
+	svc.logger = loger
+	svc.info = info
+
 	// init sync pool
-	sv.logWrapperPool = sync.Pool{
+	svc.logWrapperPool = sync.Pool{
 		New: func() interface{} {
 			new := new(CommonLogWrapper)
 			new.RefCount = 0
@@ -62,10 +68,65 @@ func NewService(info *compose.Compose, loger plogger.PolvoLogger) (Service, erro
 			return new
 		},
 	}
-	// init error group
-	sv.sensorGroup, sv.ctx = errgroup.WithContext(context.Background())
 
-	// create exporter pipes
+	// init error group
+	svc.sensorGroup, svc.ctx = errgroup.WithContext(context.Background())
+
+	// create worker maps
+	svc.filterWorkerMap = make(map[string]*filterWorker)
+	svc.processorWorkerMap = make(map[string]*processorWorker)
+	svc.sensorPipeMap = make(map[string]sensorPipe.Pipe[CommonLogWrapper])
+	svc.exporterMap = make(map[string]exporter.Exporter[CommonLogWrapper])
+
+	// create exporters
+	err := svc.createExporters(*info, loger)
+	if err != nil {
+		return nil, perror.PolvoPipelineError{
+			Code:   perror.ErrExporterCreate,
+			Origin: err,
+			Msg:    "error while construct new pipeline",
+		}
+	}
+
+	// create processor workers per pipeline
+	err = svc.createProcessors(*info, loger)
+	if err != nil {
+		return nil, perror.PolvoPipelineError{
+			Code:   perror.ErrProcessorCreate,
+			Origin: err,
+			Msg:    "error while construct new pipeline",
+		}
+	}
+
+	// make pipemap to connect workers
+	// add sensor & pipeline info to pipeMap
+	// The relationship between the sensor and the pipeline is as follows:
+	// multiple sensors -> single filterWorker per sensors -> processorWorker per pipelines -> exporter
+	pipeMap := make(map[string][]chan<- *CommonLogWrapper)
+	for _, sensorInfo := range info.Sensors {
+		pipeMap[sensorInfo.Name] = make([]chan<- *CommonLogWrapper, 0)
+	}
+	for pipelineName, pipelineInfo := range info.Service.Pipeline {
+		for _, sensorInfo := range pipelineInfo.Sensors {
+			pipeMap[sensorInfo.Name] = append(pipeMap[sensorInfo.Name], svc.processorWorkerMap[pipelineName].LogChannel())
+		}
+	}
+
+	// create filter workers & sensorPipe per sensor pipeline
+	err = svc.createFilterAndSensors(*info, loger, pipeMap)
+	if err != nil {
+		return nil, perror.PolvoPipelineError{
+			Code:   perror.ErrSensorCreate,
+			Origin: err,
+			Msg:    "error while construct new sensorPipe",
+		}
+	}
+	return svc, nil
+}
+
+func (svc *service) createExporters(info compose.Compose, loger plogger.PolvoLogger) error {
+	// create exporters
+	// exporterName is predefined in
 	for exporterName, exporterInfo := range info.Exporters {
 		// create exporter
 		switch exporterName {
@@ -80,115 +141,80 @@ func NewService(info *compose.Compose, loger plogger.PolvoLogger) (Service, erro
 			exporter, err := exporter.NewFileExporter(
 				exporterInfo.Name,
 				0,
-				sv.jsonMarshalFunc,
+				svc.jsonMarshalFunc,
 				loger,
 				exporterInfo,
 			)
 			if err != nil {
-				return nil, perror.PolvoPipelineError{
+				return perror.PolvoPipelineError{
 					Code:   perror.ErrExporterCreate,
 					Origin: err,
 					Msg:    "error while construct new pipeline",
 				}
 			}
 			// add to exporter map
-			sv.exporterMap[exporterInfo.Name] = exporter
+			svc.exporterMap[exporterInfo.Name] = exporter
 		default:
-			return nil, perror.PolvoPipelineError{
+			return perror.PolvoPipelineError{
 				Code:   perror.ErrInvalidExporterName,
 				Origin: fmt.Errorf("invalid exporter name %s", exporterInfo.Name),
-				Msg:    "error while construct new pipeline",
+				Msg:    "error while construct new exporters",
 			}
 		}
+		// print info
+		loger.PrintInfo("exporter [%s] created", exporterName)
 	}
-	// make pipemap
-	for _, sensorInfo := range info.Sensors {
-		pipeMap[sensorInfo.Name] = make([]chan<- *CommonLogWrapper, 0)
-	}
+	return nil
+}
 
+func (svc *service) createProcessors(info compose.Compose, loger plogger.PolvoLogger) error {
 	// create processor workers per pipeline
 	for pipelineName, pipelineInfo := range info.Service.Pipeline {
 		// create worker per pipeline
 		// get exporter channel from exporter map
-		exporter, ok := sv.exporterMap[pipelineInfo.Exporter.Name]
+		exporter, ok := svc.exporterMap[pipelineInfo.Exporter.Name]
 		if !ok {
-			return nil, perror.PolvoPipelineError{
+			return perror.PolvoPipelineError{
 				Code:   perror.ErrInvalidPipelineCompose,
 				Origin: fmt.Errorf("exporter %s not found", pipelineInfo.Exporter.Name),
-				Msg:    "error while construct new pipeline",
+				Msg:    "error while construct new processors",
 			}
 		}
 		processorWorker := newProcessorWorker(pipelineName, &pipelineInfo, exporter.LogChannel())
-		sv.processorWorkerMap[pipelineName] = processorWorker
-
-		// add sensor & pipeline info to pipeMap
-		for _, sensorInfo := range pipelineInfo.Sensors {
-			pipeMap[sensorInfo.Name] = append(pipeMap[sensorInfo.Name], processorWorker.LogChannel())
-		}
+		svc.processorWorkerMap[pipelineName] = processorWorker
+		// print info
+		loger.PrintInfo("processor [%s] created", pipelineName)
 	}
+	return nil
+}
 
+func (svc *service) createFilterAndSensors(info compose.Compose, loger plogger.PolvoLogger, pipeMap map[string][]chan<- *CommonLogWrapper) error {
 	// create filter workers & sensorPipe per sensor pipeline
 	for _, sensorInfo := range info.Sensors {
 		// create filter workers
-		sv.filterWorkerMap[sensorInfo.Name] = newFilterWorker(sensorInfo, pipeMap[sensorInfo.Name]...)
+		filterWorker := newFilterWorker(sensorInfo, pipeMap[sensorInfo.Name]...)
+		svc.filterWorkerMap[sensorInfo.Name] = filterWorker
 		// create worker per sensor
-		sensorPipe, err := sensorPipe.NewPipe(sensorInfo.Name, loger, sv.filterWorkerMap[sensorInfo.Name].LogChannel(), sv.jsonUnMarshalFunc)
+		sensorPipe, err := sensorPipe.NewPipe(sensorInfo.Name, loger, filterWorker.LogChannel(), svc.jsonUnMarshalFunc)
 		if err != nil {
-			return nil, perror.PolvoPipelineError{
+			return perror.PolvoPipelineError{
 				Code:   perror.ErrSensorCreate,
 				Origin: err,
-				Msg:    "error while construct new pipeline",
+				Msg:    "error while construct new sensorPipe",
 			}
 		}
-		sv.sensorPipeMap[sensorInfo.Name] = sensorPipe
+		svc.sensorPipeMap[sensorInfo.Name] = sensorPipe
+
+		// print info
+		loger.PrintInfo("filter [%s] created", sensorInfo.Name)
+		loger.PrintInfo("sensor [%s] created", sensorInfo.Name)
 	}
-	return sv, nil
+	return nil
 }
 
-func (s *service) jsonUnMarshalFunc(log string) (*CommonLogWrapper, error) {
-	// Reason for control sync pool flow in pipeline is to prevent GC overhead in massive data processing
-	// get from sync pool
-	common := s.logWrapperPool.Get().(*CommonLogWrapper)
-	// set ref count to 0
-	atomic.StoreInt32(&common.RefCount, 0)
-	// unmarshal json
-	err := json.Unmarshal([]byte(log), common)
-	if err != nil {
-		// if error occurs, return log wrapper to pool
-		s.logWrapperPool.Put(common)
-		return nil, perror.PolvoPipelineError{
-			Code:   perror.ErrPipelineUnmarshal,
-			Origin: err,
-			Msg:    "error while unmarshal pipeline",
-		}
-	}
-	return common, nil
-}
-
-func (s *service) jsonMarshalFunc(logWrapper *CommonLogWrapper) (ret []byte, err error) {
-	// Reason for control sync pool flow in pipeline is to prevent GC overhead in massive data processing
-
-	ret, err = json.Marshal(logWrapper)
-	if err != nil {
-		// if ref count is 0, it means this wrapper is unused. return to pool
-		if atomic.LoadInt32(&logWrapper.RefCount) == 0 {
-			s.logWrapperPool.Put(logWrapper)
-		}
-		return nil, perror.PolvoPipelineError{
-			Code:   perror.ErrPipelineMarshal,
-			Origin: err,
-			Msg:    "error while marshal pipeline",
-		}
-	}
-	// return to sync pool
-	// if ref count is 0, it means this wrapper is unused. return to pool
-	if atomic.LoadInt32(&logWrapper.RefCount) == 0 {
-		// fmt.Printf("Finally Recv: %v\n", logWrapper)
-		logWrapper.Tag = "USED"
-		s.logWrapperPool.Put(logWrapper)
-	}
-	return ret, nil
-}
+/************************************************************************************************************
+* Service public methods
+************************************************************************************************************/
 
 func (s *service) Start() {
 	// start exporters
@@ -321,4 +347,53 @@ func (s *service) Stop() error {
 		s.wg.Done()
 	}
 	return joinedErr
+}
+
+/************************************************************************************************************
+* Service private methods
+************************************************************************************************************/
+
+func (s *service) jsonUnMarshalFunc(log string) (*CommonLogWrapper, error) {
+	// Reason for control sync pool flow in pipeline is to prevent GC overhead in massive data processing
+	// get from sync pool
+	common := s.logWrapperPool.Get().(*CommonLogWrapper)
+	// set ref count to 0
+	atomic.StoreInt32(&common.RefCount, 0)
+	// unmarshal json
+	err := json.Unmarshal([]byte(log), common)
+	if err != nil {
+		// if error occurs, return log wrapper to pool
+		s.logWrapperPool.Put(common)
+		return nil, perror.PolvoPipelineError{
+			Code:   perror.ErrPipelineUnmarshal,
+			Origin: err,
+			Msg:    "error while unmarshal pipeline",
+		}
+	}
+	return common, nil
+}
+
+func (s *service) jsonMarshalFunc(logWrapper *CommonLogWrapper) (ret []byte, err error) {
+	// Reason for control sync pool flow in pipeline is to prevent GC overhead in massive data processing
+
+	ret, err = json.Marshal(logWrapper)
+	if err != nil {
+		// if ref count is 0, it means this wrapper is unused. return to pool
+		if atomic.LoadInt32(&logWrapper.RefCount) == 0 {
+			s.logWrapperPool.Put(logWrapper)
+		}
+		return nil, perror.PolvoPipelineError{
+			Code:   perror.ErrPipelineMarshal,
+			Origin: err,
+			Msg:    "error while marshal pipeline",
+		}
+	}
+	// return to sync pool
+	// if ref count is 0, it means this wrapper is unused. return to pool
+	if atomic.LoadInt32(&logWrapper.RefCount) == 0 {
+		// fmt.Printf("Finally Recv: %v\n", logWrapper)
+		logWrapper.Tag = "USED"
+		s.logWrapperPool.Put(logWrapper)
+	}
+	return ret, nil
 }
