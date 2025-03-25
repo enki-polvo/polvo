@@ -16,6 +16,7 @@ const (
 	ErrPipelineMarshal
 	ErrInvalidExporterName
 	ErrExporterCreate
+	ErrProcessorCreate
 )
 
 type PolvoPipelineError struct {
