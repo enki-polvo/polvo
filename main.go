@@ -35,8 +35,11 @@ func main() {
 		loger    plogger.PolvoLogger
 		composer compose.ComposeFile
 		svc      service.Service
+		exitCode int
 	)
 
+	exitCode = 0
+	// handle signal
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
@@ -64,6 +67,7 @@ func main() {
 		err = svc.Stop()
 		if err != nil {
 			fmt.Printf("error while stop service %v", err)
+			exitCode = 75
 		}
 	}()
 
@@ -75,7 +79,9 @@ func main() {
 		fmt.Printf("error while waiting service %v", err)
 		// call stop to ensure all resources are released
 		stop()
+		exitCode = 75
 	}
 	fmt.Println("Service stopped")
 	loger.Close()
+	os.Exit(exitCode)
 }
