@@ -27,22 +27,12 @@ exporters:
         destination: "./sys.log"
         timeout: 5
 
-# filters:
-#     filter_agent:
-#         detection:
-#             filter_agent:
-#                 FileName|contains: "ebpf_sensor"
-#             filter_cmd:
-#                 CommandLine|endswith: "ebpf_sensor"
-#             condition: 1 of filter_*
-
 service:
     description: "Sample test service"
     group: "Sample group"
     pipelines:
         trace_pipe:
             sensors: [ebpf_sensor]
-            # filters: [filter_agent]
             exporter: file
         # log_pipe:
         #     sensors: [ebpf_sensor]
