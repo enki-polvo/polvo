@@ -10,6 +10,7 @@ import (
 	"polvo/exporter"
 	plogger "polvo/logger"
 	"polvo/sensorPipe"
+	"polvo/service/model"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -34,8 +35,8 @@ type service struct {
 	// maps for workers
 	filterWorkerMap    map[string]*filterWorker
 	processorWorkerMap map[string]*processorWorker
-	sensorPipeMap      map[string]sensorPipe.Pipe[CommonLogWrapper]
-	exporterMap        map[string]exporter.Exporter[CommonLogWrapper]
+	sensorPipeMap      map[string]sensorPipe.Pipe[model.CommonLogWrapper]
+	exporterMap        map[string]exporter.Exporter[model.CommonLogWrapper]
 	// sync pool
 	logWrapperPool sync.Pool
 	// wait group
@@ -62,7 +63,7 @@ func NewService(info *compose.Compose, loger plogger.PolvoLogger) (Service, erro
 	// init sync pool
 	svc.logWrapperPool = sync.Pool{
 		New: func() interface{} {
-			new := new(CommonLogWrapper)
+			new := new(model.CommonLogWrapper)
 			new.RefCount = 0
 			new.Tag = "NEW"
 			return new
@@ -75,8 +76,8 @@ func NewService(info *compose.Compose, loger plogger.PolvoLogger) (Service, erro
 	// create worker maps
 	svc.filterWorkerMap = make(map[string]*filterWorker)
 	svc.processorWorkerMap = make(map[string]*processorWorker)
-	svc.sensorPipeMap = make(map[string]sensorPipe.Pipe[CommonLogWrapper])
-	svc.exporterMap = make(map[string]exporter.Exporter[CommonLogWrapper])
+	svc.sensorPipeMap = make(map[string]sensorPipe.Pipe[model.CommonLogWrapper])
+	svc.exporterMap = make(map[string]exporter.Exporter[model.CommonLogWrapper])
 
 	// create exporters
 	err := svc.createExporters(*info, loger)
@@ -102,9 +103,9 @@ func NewService(info *compose.Compose, loger plogger.PolvoLogger) (Service, erro
 	// add sensor & pipeline info to pipeMap
 	// The relationship between the sensor and the pipeline is as follows:
 	// multiple sensors -> single filterWorker per sensors -> processorWorker per pipelines -> exporter
-	pipeMap := make(map[string][]chan<- *CommonLogWrapper)
+	pipeMap := make(map[string][]chan<- *model.CommonLogWrapper)
 	for _, sensorInfo := range info.Sensors {
-		pipeMap[sensorInfo.Name] = make([]chan<- *CommonLogWrapper, 0)
+		pipeMap[sensorInfo.Name] = make([]chan<- *model.CommonLogWrapper, 0)
 	}
 	for pipelineName, pipelineInfo := range info.Service.Pipeline {
 		for _, sensorInfo := range pipelineInfo.Sensors {
@@ -188,7 +189,7 @@ func (svc *service) createProcessors(info compose.Compose, loger plogger.PolvoLo
 	return nil
 }
 
-func (svc *service) createFilterAndSensors(info compose.Compose, loger plogger.PolvoLogger, pipeMap map[string][]chan<- *CommonLogWrapper) error {
+func (svc *service) createFilterAndSensors(info compose.Compose, loger plogger.PolvoLogger, pipeMap map[string][]chan<- *model.CommonLogWrapper) error {
 	// create filter workers & sensorPipe per sensor pipeline
 	for _, sensorInfo := range info.Sensors {
 		// create filter workers
@@ -353,10 +354,10 @@ func (s *service) Stop() error {
 * Service private methods
 ************************************************************************************************************/
 
-func (s *service) jsonUnMarshalFunc(log string) (*CommonLogWrapper, error) {
+func (s *service) jsonUnMarshalFunc(log string) (*model.CommonLogWrapper, error) {
 	// Reason for control sync pool flow in pipeline is to prevent GC overhead in massive data processing
 	// get from sync pool
-	common := s.logWrapperPool.Get().(*CommonLogWrapper)
+	common := s.logWrapperPool.Get().(*model.CommonLogWrapper)
 	// set ref count to 0
 	atomic.StoreInt32(&common.RefCount, 0)
 	// unmarshal json
@@ -373,7 +374,7 @@ func (s *service) jsonUnMarshalFunc(log string) (*CommonLogWrapper, error) {
 	return common, nil
 }
 
-func (s *service) jsonMarshalFunc(logWrapper *CommonLogWrapper) (ret []byte, err error) {
+func (s *service) jsonMarshalFunc(logWrapper *model.CommonLogWrapper) (ret []byte, err error) {
 	// Reason for control sync pool flow in pipeline is to prevent GC overhead in massive data processing
 
 	ret, err = json.Marshal(logWrapper)

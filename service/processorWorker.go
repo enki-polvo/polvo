@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"polvo/compose"
+	"polvo/service/model"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -22,18 +23,18 @@ type processorWorker struct {
 	info                 *compose.PipelineInfo // TODO: processor info will be added.
 	eventHeaderPerSensor map[string]map[string][]string
 	// sensor pipe
-	inboundChannel chan *CommonLogWrapper
+	inboundChannel chan *model.CommonLogWrapper
 	// outbound pipes
-	outboundChannel chan<- *CommonLogWrapper
+	outboundChannel chan<- *model.CommonLogWrapper
 	// wait group for processor thread
 	waitForEndRemainTasks sync.WaitGroup
 }
 
-func (p *processorWorker) LogChannel() chan<- *CommonLogWrapper {
+func (p *processorWorker) LogChannel() chan<- *model.CommonLogWrapper {
 	return p.inboundChannel
 }
 
-func newProcessorWorker(name string, info *compose.PipelineInfo, exporterChan chan<- *CommonLogWrapper) *processorWorker {
+func newProcessorWorker(name string, info *compose.PipelineInfo, exporterChan chan<- *model.CommonLogWrapper) *processorWorker {
 	nw := new(processorWorker)
 
 	// set name
@@ -49,7 +50,7 @@ func newProcessorWorker(name string, info *compose.PipelineInfo, exporterChan ch
 		nw.eventHeaderPerSensor[sensorInfo.Name] = sensorInfo.EventsHeader
 	}
 	// set channel
-	nw.inboundChannel = make(chan *CommonLogWrapper)
+	nw.inboundChannel = make(chan *model.CommonLogWrapper)
 	nw.outboundChannel = exporterChan
 	// init sync pool
 	return nw
@@ -81,7 +82,7 @@ func (p *processorWorker) Kill() error {
 
 func (p *processorWorker) processorThread() {
 	var (
-		log *CommonLogWrapper
+		log *model.CommonLogWrapper
 	)
 
 	for {

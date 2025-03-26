@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"polvo/compose"
+	"polvo/service/model"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -22,18 +23,18 @@ type filterWorker struct {
 	info        *compose.SensorInfo // TODO: processor info will be added.
 	eventHeader map[string][]string
 	// sensor pipe
-	inboundChannel chan *CommonLogWrapper
+	inboundChannel chan *model.CommonLogWrapper
 	// outbound pipes
-	outboundChannel []chan<- *CommonLogWrapper
+	outboundChannel []chan<- *model.CommonLogWrapper
 	// wait group for filter thread
 	waitForEndRemainTasks sync.WaitGroup
 }
 
-func (w *filterWorker) LogChannel() chan<- *CommonLogWrapper {
+func (w *filterWorker) LogChannel() chan<- *model.CommonLogWrapper {
 	return w.inboundChannel
 }
 
-func newFilterWorker(info *compose.SensorInfo, outboundChan ...chan<- *CommonLogWrapper) *filterWorker {
+func newFilterWorker(info *compose.SensorInfo, outboundChan ...chan<- *model.CommonLogWrapper) *filterWorker {
 	nw := new(filterWorker)
 
 	// dependency injection
@@ -42,8 +43,8 @@ func newFilterWorker(info *compose.SensorInfo, outboundChan ...chan<- *CommonLog
 	// context
 	nw.ctx, nw.cancel = context.WithCancel(context.Background())
 	// set channels
-	nw.inboundChannel = make(chan *CommonLogWrapper)
-	nw.outboundChannel = make([]chan<- *CommonLogWrapper, 0)
+	nw.inboundChannel = make(chan *model.CommonLogWrapper)
+	nw.outboundChannel = make([]chan<- *model.CommonLogWrapper, 0)
 	nw.outboundChannel = append(nw.outboundChannel, outboundChan...)
 	// init sync pool
 	return nw
@@ -75,8 +76,8 @@ func (w *filterWorker) Kill() error {
 
 func (w *filterWorker) filterThread() {
 	var (
-		log             *CommonLogWrapper
-		outboundChannel chan<- *CommonLogWrapper
+		log             *model.CommonLogWrapper
+		outboundChannel chan<- *model.CommonLogWrapper
 	)
 
 	for {
