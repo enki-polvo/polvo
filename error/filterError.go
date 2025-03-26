@@ -6,6 +6,7 @@ type PolvoErrFilter int
 
 const (
 	ErrDetectionField PolvoErrFilter = iota
+	ErrRuleField
 )
 
 type PolvoFilterError struct {
