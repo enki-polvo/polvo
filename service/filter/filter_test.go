@@ -12,20 +12,18 @@ import (
 
 const sampleFilter = `
 version: 1.0
-allow:
-  "filter_test":
-    "eventname|contains":
-      - "bashReadline"
-      - "process"
-    "Commandline|contains":
-      - "ls"
-      - "cat"
 deny:
-  "!filter_NOT":
-    "eventname|startswith": "process"
-    "Commandline|endswith":
-      - "bash"
-      - "-al"
+  "filter_bash":
+    "condition":
+      "eventname|startswith": "process"
+      "Command|contains":
+        - "bash"
+        - "sleep"
+    "exception":
+      "eventname": "bashReadline"
+      "Commandline|contains":
+        - "ls"
+        - "cat"
 `
 
 var (
@@ -146,12 +144,13 @@ func TestParseRuleFieldWithInvalidParser(t *testing.T) {
 	t.Logf("NewRuleOperate(%s) = %v, want not nil", sample, err)
 }
 
-func TestNewRuleSelectionOperatorWithStartsWith(t *testing.T) {
+func TestNewDenyOperatorWithStartsWith(t *testing.T) {
 	sample := `
-allow:
+deny:
   "filter_null":
-    "eventname|startswith": "bash"
-    "source": "eBPF"
+    "condition":
+      "eventname|startswith": "bash"
+      "source": "eBPF"
 
 `
 	sampleLog := `
@@ -182,8 +181,8 @@ allow:
 		t.Fatalf("json.Unmarshal(%s) = %v, want nil", sampleLog, err)
 	}
 	// test
-	for selectionName, selection := range sampleRule.Allow {
-		selection, err := filter.NewRuleSelectionOperator(parser, selectionName, &selection)
+	for selectionName, selection := range sampleRule.Deny {
+		selection, err := filter.NewDenyOperator(parser, selectionName, &selection)
 		if err != nil {
 			t.Fatalf("NewRuleOperate(%s) = nil, want not nil", sample)
 		}
@@ -195,14 +194,15 @@ allow:
 	}
 }
 
-func TestNewRuleSelectionOperatorWithContains(t *testing.T) {
+func TestNewDenyOperatorWithContains(t *testing.T) {
 	sample := `
-allow:
+deny:
   "filter_null":
-    "eventname": "bashReadline"
-    "Commandline|contains":
-      - "echo"
-      - "ls"
+    "condition":
+      "eventname": "bashReadline"
+      "Commandline|contains":
+        - "echo"
+        - "ls"
 `
 	sampleLog := `
 {
@@ -232,8 +232,8 @@ allow:
 		t.Fatalf("json.Unmarshal(%s) = %v, want nil", sampleLog, err)
 	}
 	// test
-	for selectionName, selection := range sampleRule.Allow {
-		selection, err := filter.NewRuleSelectionOperator(parser, selectionName, &selection)
+	for selectionName, selection := range sampleRule.Deny {
+		selection, err := filter.NewDenyOperator(parser, selectionName, &selection)
 		if err != nil {
 			t.Fatalf("NewRuleOperate(%s) = nil, want not nil", sample)
 		}
@@ -245,12 +245,13 @@ allow:
 	}
 }
 
-func TestNewRuleSelectionOperatorWithEndsWith(t *testing.T) {
+func TestNewDenyOperatorWithEndsWith(t *testing.T) {
 	sample := `
-allow:
+deny:
   "filter_null":
-    "eventname|endswith": "Readline"
-    "Username": "shhong"
+    "condition":
+      "eventname|endswith": "Readline"
+      "Username": "shhong"
 `
 	sampleLog := `
 {
@@ -279,8 +280,8 @@ allow:
 		t.Fatalf("json.Unmarshal(%s) = %v, want nil", sampleLog, err)
 	}
 	// test
-	for selectionName, selection := range sampleRule.Allow {
-		selection, err := filter.NewRuleSelectionOperator(parser, selectionName, &selection)
+	for selectionName, selection := range sampleRule.Deny {
+		selection, err := filter.NewDenyOperator(parser, selectionName, &selection)
 		if err != nil {
 			t.Fatalf("NewRuleOperate(%s) = nil, want not nil", sample)
 		}
@@ -292,16 +293,17 @@ allow:
 	}
 }
 
-func TestNewRuleSelectionOperatorWithAll(t *testing.T) {
+func TestNewDenyOperatorWithAll(t *testing.T) {
 	sample := `
-allow:
+deny:
   "filter_null":
-    "Commandline|contains|all":
-      - "echo"
-      - "hello"
-    "source|endswith":
-      - "BPF"
-      - "PF"
+    "condition":
+      "Commandline|contains|all":
+        - "echo"
+        - "hello"
+      "source|endswith":
+        - "BPF"
+        - "PF"
 `
 	sampleLog := `
 {
@@ -330,8 +332,8 @@ allow:
 		t.Fatalf("json.Unmarshal(%s) = %v, want nil", sampleLog, err)
 	}
 	// test
-	for selectionName, selection := range sampleRule.Allow {
-		selection, err := filter.NewRuleSelectionOperator(parser, selectionName, &selection)
+	for selectionName, selection := range sampleRule.Deny {
+		selection, err := filter.NewDenyOperator(parser, selectionName, &selection)
 		if err != nil {
 			t.Fatalf("NewRuleOperate(%s) = nil, want not nil", sample)
 		}
@@ -343,14 +345,14 @@ allow:
 	}
 }
 
-func TestNewRuleSelectionOperatorWithAllError(t *testing.T) {
+func TestNewDenyOperatorWithAllError(t *testing.T) {
 	sample := `
-allow:
+deny:
   "filter_null":
-    "eventname": "bashReadline"
-    "Commandline|contains|all":
-      - "echo"
-      - "cat"
+    "condition":
+      "Commandline|contains|all":
+        - "echo"
+        - "cat"
 `
 	sampleLog := `
 {
@@ -380,8 +382,8 @@ allow:
 		t.Fatalf("json.Unmarshal(%s) = %v, want nil", sampleLog, err)
 	}
 	// test
-	for selectionName, selection := range sampleRule.Allow {
-		selection, err := filter.NewRuleSelectionOperator(parser, selectionName, &selection)
+	for selectionName, selection := range sampleRule.Deny {
+		selection, err := filter.NewDenyOperator(parser, selectionName, &selection)
 		if err != nil {
 			t.Fatalf("NewRuleOperate(%s) = nil, want not nil", sample)
 		}
@@ -394,116 +396,126 @@ allow:
 
 }
 
-func TestNewRuleSelectionOperatorWithNOT(t *testing.T) {
-	sample := `
-allow:
-  "!filter_null":
-    "eventname": "bashReadline"
-    "Commandline|contains|all":
-      - "echo"
-      - "cat"
-`
-	sampleLog := `
-{
-	"eventname": "bashReadline",
-	"source": "eBPF",
-	"timestamp": "2025-03-11T15:29:34+09:00",
-	"log": "A user has entered a command in the bash shell",
-	"metadata": {
-		"Commandline": "echo hello world",
-		"PID": 191998,
-		"UID": 1000,
-		"Username": "shhong"
-	}
-}
-	`
+// (DEPRECATED)
+//
+// func TestNewDenyOperatorWithNOT(t *testing.T) {
+// 	sample := `
+// deny:
+//   "!filter_null":
+//     "eventname": "bashReadline"
+//     "Commandline|contains|all":
+//       - "echo"
+//       - "cat"
+// `
+// 	sampleLog := `
+// {
+// 	"eventname": "bashReadline",
+// 	"source": "eBPF",
+// 	"timestamp": "2025-03-11T15:29:34+09:00",
+// 	"log": "A user has entered a command in the bash shell",
+// 	"metadata": {
+// 		"Commandline": "echo hello world",
+// 		"PID": 191998,
+// 		"UID": 1000,
+// 		"Username": "shhong"
+// 	}
+// }
+// 	`
 
-	var sampleRule filter.Filter
-	// unmarshal yaml
-	err := yaml.Unmarshal([]byte(sample), &sampleRule)
-	if err != nil {
-		t.Fatalf("yaml.Unmarshal(%s) = %v, want nil", sample, err)
-	}
-	// unmarshal log
-	log := new(model.CommonLogWrapper)
-	err = json.Unmarshal([]byte(sampleLog), log)
-	if err != nil {
-		t.Fatalf("json.Unmarshal(%s) = %v, want nil", sampleLog, err)
-	}
-	// test
-	for selectionName, selection := range sampleRule.Allow {
-		selection, err := filter.NewRuleSelectionOperator(parser, selectionName, &selection)
-		if err != nil {
-			t.Fatalf("NewRuleOperate(%s) = nil, want not nil", sample)
-		}
-		out := selection.Operation(log)
-		if !out {
-			t.Fatalf("NewRuleOperate(%s) = %v, want true", selectionName, out)
-		}
-		t.Logf("NewRuleOperate(%s) = %v, want true", selectionName, out)
-	}
+// 	var sampleRule filter.Filter
+// 	// unmarshal yaml
+// 	err := yaml.Unmarshal([]byte(sample), &sampleRule)
+// 	if err != nil {
+// 		t.Fatalf("yaml.Unmarshal(%s) = %v, want nil", sample, err)
+// 	}
+// 	// unmarshal log
+// 	log := new(model.CommonLogWrapper)
+// 	err = json.Unmarshal([]byte(sampleLog), log)
+// 	if err != nil {
+// 		t.Fatalf("json.Unmarshal(%s) = %v, want nil", sampleLog, err)
+// 	}
+// 	// test
+// 	for selectionName, selection := range sampleRule.Deny {
+// 		selection, err := filter.NewDenyOperator(parser, selectionName, &selection)
+// 		if err != nil {
+// 			t.Fatalf("NewRuleOperate(%s) = nil, want not nil", sample)
+// 		}
+// 		out := selection.Operation(log)
+// 		if !out {
+// 			t.Fatalf("NewRuleOperate(%s) = %v, want true", selectionName, out)
+// 		}
+// 		t.Logf("NewRuleOperate(%s) = %v, want true", selectionName, out)
+// 	}
 
-}
+// }
 
-func TestNewRuleSelectionOperatorWithWrongCollectionName(t *testing.T) {
-	sample := `
-allow:
-  "fil!ter_null":
-    "eventname": "bashReadline"
-    "Commandline|contains|all":
-      - "echo"
-      - "cat"
-`
-	sampleLog := `
-{
-	"eventname": "bashReadline",
-	"source": "eBPF",
-	"timestamp": "2025-03-11T15:29:34+09:00",
-	"log": "A user has entered a command in the bash shell",
-	"metadata": {
-		"Commandline": "echo hello world",
-		"PID": 191998,
-		"UID": 1000,
-		"Username": "shhong"
-	}
-}
-	`
+// func TestNewDenyOperatorWithWrongCollectionName(t *testing.T) {
+// 	sample := `
+// deny:
+//   "fil!ter_null":
+//     "eventname": "bashReadline"
+//     "Commandline|contains|all":
+//       - "echo"
+//       - "cat"
+// `
+// 	sampleLog := `
+// {
+// 	"eventname": "bashReadline",
+// 	"source": "eBPF",
+// 	"timestamp": "2025-03-11T15:29:34+09:00",
+// 	"log": "A user has entered a command in the bash shell",
+// 	"metadata": {
+// 		"Commandline": "echo hello world",
+// 		"PID": 191998,
+// 		"UID": 1000,
+// 		"Username": "shhong"
+// 	}
+// }
+// 	`
 
-	var sampleRule filter.Filter
-	// unmarshal yaml
-	err := yaml.Unmarshal([]byte(sample), &sampleRule)
-	if err != nil {
-		t.Fatalf("yaml.Unmarshal(%s) = %v, want nil", sample, err)
-	}
-	// unmarshal log
-	log := new(model.CommonLogWrapper)
-	err = json.Unmarshal([]byte(sampleLog), log)
-	if err != nil {
-		t.Fatalf("json.Unmarshal(%s) = %v, want nil", sampleLog, err)
-	}
-	// test
-	for selectionName, selection := range sampleRule.Allow {
-		_, err := filter.NewRuleSelectionOperator(parser, selectionName, &selection)
-		if err == nil {
-			t.Fatalf("NewRuleOperate(%s) != nil, want nil", selectionName)
-		}
-		t.Logf("selection name '%s' returns err: %v, want true", selectionName, err)
-	}
+// 	var sampleRule filter.Filter
+// 	// unmarshal yaml
+// 	err := yaml.Unmarshal([]byte(sample), &sampleRule)
+// 	if err != nil {
+// 		t.Fatalf("yaml.Unmarshal(%s) = %v, want nil", sample, err)
+// 	}
+// 	// unmarshal log
+// 	log := new(model.CommonLogWrapper)
+// 	err = json.Unmarshal([]byte(sampleLog), log)
+// 	if err != nil {
+// 		t.Fatalf("json.Unmarshal(%s) = %v, want nil", sampleLog, err)
+// 	}
+// 	// test
+// 	for selectionName, selection := range sampleRule.Deny {
+// 		_, err := filter.NewDenyOperator(parser, selectionName, &selection)
+// 		if err == nil {
+// 			t.Fatalf("NewRuleOperate(%s) != nil, want nil", selectionName)
+// 		}
+// 		t.Logf("selection name '%s' returns err: %v, want true", selectionName, err)
+// 	}
 
-}
+// }
 
 func TestFilterOperation(t *testing.T) {
 	sampleLog := `
 {
-	"eventname": "bashReadline",
-	"source": "eBPF",
-	"timestamp": "2025-03-11T15:29:34+09:00",
-	"log": "A user has entered a command in the bash shell",
-	"metadata": {
-		"Commandline": "ls -al",
-		"PID": 191998,
-		"UID": 1000,
-		"Username": "shhong"
+	"eventname":"processCreate",
+	"source":"eBPF",
+	"timestamp":"2025-03-27T20:54:22.051986+09:00",
+	"log":"A process has been created",
+	"metadata":{
+		"Argc":2,
+		"Args":["sleep","1","","","","","","","",""],
+		"BpfTimestamp":"2025-03-27T20:54:22.059441750+09:00",
+		"Command":"cpuUsage.sh",
+		"Envc":10,
+		"Envs":["SHELL=/bin/bash","QT_ACCESSIBILITY=1","COLORTERM=truecolor","VSCODE_VERBOSE_LOGGING=true","XDG_CONFIG_DIRS=/etc/xdg/xdg-ubuntu:/etc/xdg","NVM_INC=/home/shhong/.nvm/versions/node/v22.12.0/include/node","XDG_MENU_PREFIX=gnome-","GNOME_DESKTOP_SESSION_ID=this-is-deprecated","LANGUAGE=en"],
+		"Filename":"/usr/bin/sleep",
+		"PID":92303,
+		"PPID":92300,
+		"TGID":92303,
+		"UID":1000,
+		"Username":"shhong"
 	}
 }
 	`
@@ -523,7 +535,7 @@ func TestFilterOperation(t *testing.T) {
 	t.Logf("FilterOperation() = %v, want true", out)
 }
 
-func TestFilterOperationWithBothDenyAndAllow(t *testing.T) {
+func TestFilterOperationWithException(t *testing.T) {
 	sampleLog := `
 {
 	"eventname": "bashReadline",
@@ -548,13 +560,13 @@ func TestFilterOperationWithBothDenyAndAllow(t *testing.T) {
 
 	// test
 	out := filterOP.Operation(log)
-	if !out {
-		t.Fatalf("FilterOperation() = %v, want true", out)
+	if out {
+		t.Fatalf("FilterOperation() = %v, want false", out)
 	}
-	t.Logf("FilterOperation() = %v, want true", out)
+	t.Logf("FilterOperation() = %v, want false", out)
 }
 
-func TestFilterOperationWithDeny(t *testing.T) {
+func TestFilterOperationWithPassFilter(t *testing.T) {
 	sampleLog := `
 {
 	"eventname": "fileCreate",
@@ -582,10 +594,10 @@ func TestFilterOperationWithDeny(t *testing.T) {
 	if out {
 		t.Fatalf("FilterOperation() = %v, want false", out)
 	}
-	t.Logf("FilterOperation() = %v, want false", out)
+	t.Logf("FilterOperation() = %v, want true", out)
 }
 
-func TestFilterOperationWithNothing(t *testing.T) {
+func TestFilterOperationWithDrop(t *testing.T) {
 	sampleLog := `
 {
 	"eventname": "processCreate",
