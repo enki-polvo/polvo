@@ -60,6 +60,8 @@ func NewFilterOperator(filterData []byte) (FilterOperator, error) {
 
 // FilterOperation works as Follows:
 // 1. If Operation returns true, log will be denied
+// 2. If Operation returns false, log will be allowed
+// 3. If exception returns true, log will be allowed
 func (f *filterOperator) Operation(log *model.CommonLogWrapper) bool {
 	// check Deny First, then Allow
 	return Or(f.deny).Operation(log)
@@ -105,8 +107,9 @@ func NewDenyOperator(parser Parser, selectionName string, rules *Deny) (Logic, e
 }
 
 // Operation works as Follows:
-// 1. If Deny is true, then return false
-// 2. If Exception is true, then return true
+// 1. If Operation returns true, log will be denied
+// 2. If Operation returns false, log will be allowed
+// 3. If exception returns true, log will be allowed
 func (dOP *DenyOperator) Operation(log *model.CommonLogWrapper) bool {
 	var (
 		denyResult      bool
