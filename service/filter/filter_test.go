@@ -10,13 +10,36 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+const sampleFilter = `
+version: 1.0
+allow:
+  "filter_test":
+    "eventname|contains":
+      - "bashReadline"
+      - "process"
+    "Commandline|contains":
+      - "ls"
+      - "cat"
+deny:
+  "!filter_NOT":
+    "eventname|startswith": "process"
+    "Commandline|endswith":
+      - "bash"
+      - "-al"
+`
+
 var (
-	parser filter.Parser
+	parser   filter.Parser
+	filterOP filter.FilterOperator
 )
 
 func TestMain(m *testing.M) {
 	var err error
 	parser, err = filter.NewParser()
+	if err != nil {
+		panic(err)
+	}
+	filterOP, err = filter.NewFilterOperator([]byte(sampleFilter))
 	if err != nil {
 		panic(err)
 	}
@@ -467,4 +490,128 @@ allow:
 		t.Logf("selection name '%s' returns err: %v, want true", selectionName, err)
 	}
 
+}
+
+func TestFilterOperation(t *testing.T) {
+	sampleLog := `
+{
+	"eventname": "bashReadline",
+	"source": "eBPF",
+	"timestamp": "2025-03-11T15:29:34+09:00",
+	"log": "A user has entered a command in the bash shell",
+	"metadata": {
+		"Commandline": "ls -al",
+		"PID": 191998,
+		"UID": 1000,
+		"Username": "shhong"
+	}
+}
+	`
+
+	// unmarshal log
+	log := new(model.CommonLogWrapper)
+	err := json.Unmarshal([]byte(sampleLog), log)
+	if err != nil {
+		t.Fatalf("json.Unmarshal(%s) = %v, want nil", sampleLog, err)
+	}
+
+	// test
+	out := filterOP.Operation(log)
+	if !out {
+		t.Fatalf("FilterOperation() = %v, want true", out)
+	}
+	t.Logf("FilterOperation() = %v, want true", out)
+}
+
+func TestFilterOperationWithBothDenyAndAllow(t *testing.T) {
+	sampleLog := `
+{
+	"eventname": "bashReadline",
+	"source": "eBPF",
+	"timestamp": "2025-03-11T15:29:34+09:00",
+	"log": "A user has entered a command in the bash shell",
+	"metadata": {
+		"Commandline": "ls -al",
+		"PID": 191998,
+		"UID": 1000,
+		"Username": "shhong"
+	}
+}
+	`
+
+	// unmarshal log
+	log := new(model.CommonLogWrapper)
+	err := json.Unmarshal([]byte(sampleLog), log)
+	if err != nil {
+		t.Fatalf("json.Unmarshal(%s) = %v, want nil", sampleLog, err)
+	}
+
+	// test
+	out := filterOP.Operation(log)
+	if !out {
+		t.Fatalf("FilterOperation() = %v, want true", out)
+	}
+	t.Logf("FilterOperation() = %v, want true", out)
+}
+
+func TestFilterOperationWithDeny(t *testing.T) {
+	sampleLog := `
+{
+	"eventname": "fileCreate",
+	"source": "eBPF",
+	"timestamp": "2025-03-11T15:29:34+09:00",
+	"log": "A user created file",
+	"metadata": {
+		"fileName": "hello.txt",
+		"PID": 191998,
+		"UID": 1000,
+		"Username": "shhong"
+	}
+}
+	`
+
+	// unmarshal log
+	log := new(model.CommonLogWrapper)
+	err := json.Unmarshal([]byte(sampleLog), log)
+	if err != nil {
+		t.Fatalf("json.Unmarshal(%s) = %v, want nil", sampleLog, err)
+	}
+
+	// test
+	out := filterOP.Operation(log)
+	if out {
+		t.Fatalf("FilterOperation() = %v, want false", out)
+	}
+	t.Logf("FilterOperation() = %v, want false", out)
+}
+
+func TestFilterOperationWithNothing(t *testing.T) {
+	sampleLog := `
+{
+	"eventname": "processCreate",
+	"source": "eBPF",
+	"timestamp": "2025-03-11T15:29:34+09:00",
+	"log": "A user created process",
+	"metadata": {
+		"Commandline": "/bin/bash",
+		"PID": 191998,
+		"UID": 1000,
+		"Username": "shhong"
+	}
+}
+	`
+
+	// unmarshal log
+	log := new(model.CommonLogWrapper)
+	err := json.Unmarshal([]byte(sampleLog), log)
+	if err != nil {
+		t.Fatalf("json.Unmarshal(%s) = %v, want nil", sampleLog, err)
+	}
+
+	// test
+	out := filterOP.Operation(log)
+	if !out {
+		t.Fatalf("FilterOperation() = %v, want true", out)
+	}
+	t.Logf("FilterOperation() = %v, want true", out)
 }
