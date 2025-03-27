@@ -7,6 +7,7 @@ type PolvoErrFilter int
 const (
 	ErrCollectionField PolvoErrFilter = iota
 	ErrRuleField
+	ErrFilterConstructor
 )
 
 type PolvoFilterError struct {

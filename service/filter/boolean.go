@@ -5,11 +5,16 @@ import "polvo/service/model"
 type And []Logic
 
 func (logic And) Operation(log *model.CommonLogWrapper) bool {
+	var (
+		conv bool
+		l    Logic
+	)
+
 	if len(logic) == 1 {
 		return logic[0].Operation(log)
 	} else {
-		conv := true
-		for _, l := range logic {
+		conv = true
+		for _, l = range logic {
 			conv = conv && l.Operation(log)
 		}
 		return conv
@@ -19,11 +24,16 @@ func (logic And) Operation(log *model.CommonLogWrapper) bool {
 type Or []Logic
 
 func (logic Or) Operation(log *model.CommonLogWrapper) bool {
+	var (
+		conv bool
+		e    Logic
+	)
+
 	if len(logic) == 1 {
 		return logic[0].Operation(log)
 	} else {
-		conv := false
-		for _, e := range logic {
+		conv = false
+		for _, e = range logic {
 			conv = conv || e.Operation(log)
 		}
 		return conv

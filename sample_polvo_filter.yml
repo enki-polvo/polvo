@@ -1,9 +1,11 @@
 version: 0.0.0
 
-SampleRule:
-  detection:
-    filter_null:
-      FileName|contains: "null"
-  
-  condition: (1 of filter_*)
-  type: allow # allow or deny
+allow:
+  !filter_file:
+    "eventname|endswith": "Readline"
+    "Username": "shhong"
+
+Deny:
+  filter_null:
+    "eventname|endswith": "Readline"
+    "Username": "shhong"

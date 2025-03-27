@@ -36,6 +36,11 @@ const (
 )
 
 // # RuleSelectionOperator
+//
+// RuleSelectionOperator combines multiple rules with AND or NOT operations.
+// The group name is the name of the group to which the rules belong.
+// If the group name starts with "!", it is a NOT operation.
+// So if the group name contains "!", it is not a valid group name. so error will be returned.
 type RuleSelectionOperator struct {
 	groupName string
 	rules     []Logic
