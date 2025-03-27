@@ -7,6 +7,14 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+// # FilterOperator
+//
+// FilterOperator implements filter operations based on a filter yaml file.
+// FilterOperation is divided into Allow and Deny.
+// If the Deny operation is true, the result is false.
+// If the Allow operation is true, the result is true.
+// If the Deny operation is false and the Allow operation is false, the result is true.
+// If the Deny operation is false and the Allow operation is true, the result is true.
 type FilterOperator interface {
 	Operation(log *model.CommonLogWrapper) bool
 }
@@ -72,7 +80,7 @@ func NewFilterOperator(filterData []byte) (FilterOperator, error) {
 // 1. Check Deny First, then Allow
 // 2. If Deny is true, then return false
 // 3. If Allow is true, then return true
-// 4. If Deny is false and Allow is false, then return false
+// 4. If Deny is false and Allow is false, then return true
 // 5. If Deny is false and Allow is true, then return true
 func (f *filterOperator) Operation(log *model.CommonLogWrapper) bool {
 	var (
