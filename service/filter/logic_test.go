@@ -123,11 +123,13 @@ func TestParseRuleFieldWithInvalidParser(t *testing.T) {
 	t.Logf("NewRuleOperate(%s) = %v, want not nil", sample, err)
 }
 
-func TestNewRuleOperator(t *testing.T) {
+func TestNewRuleSelectionOperatorWithStartsWith(t *testing.T) {
 	sample := `
-detection:
+allow:
   "filter_null":
     "eventname|startswith": "bash"
+    "source": "eBPF"
+
 `
 	sampleLog := `
 {
@@ -144,7 +146,7 @@ detection:
 }
 	`
 
-	var sampleRule filter.Detection
+	var sampleRule filter.Filter
 	// unmarshal yaml
 	err := yaml.Unmarshal([]byte(sample), &sampleRule)
 	if err != nil {
@@ -157,26 +159,75 @@ detection:
 		t.Fatalf("json.Unmarshal(%s) = %v, want nil", sampleLog, err)
 	}
 	// test
-	for _, dval := range sampleRule.Detections {
-		for key, val := range dval {
-			dOPs, err := filter.NewRuleOperator(parser, key, &val)
-			if err != nil {
-				t.Fatalf("NewRuleOperate(%s) = nil, want not nil", sample)
-			}
-			out := dOPs.Operation(log)
-			if !out {
-				t.Fatalf("NewRuleOperate(%s) = %v, want true", key, out)
-			}
-			t.Logf("NewRuleOperate(%s) = %v, want true", key, out)
+	for selectionName, selection := range sampleRule.Allow {
+		selection, err := filter.NewRuleSelectionOperator(parser, selectionName, &selection)
+		if err != nil {
+			t.Fatalf("NewRuleOperate(%s) = nil, want not nil", sample)
 		}
+		out := selection.Operation(log)
+		if !out {
+			t.Fatalf("NewRuleOperate(%s) = %v, want true", selectionName, out)
+		}
+		t.Logf("NewRuleOperate(%s) = %v, want true", selectionName, out)
 	}
 }
 
-func TestNewRuleOperator2(t *testing.T) {
+func TestNewRuleSelectionOperatorWithContains(t *testing.T) {
 	sample := `
-detection:
+allow:
+  "filter_null":
+    "eventname": "bashReadline"
+    "Commandline|contains":
+      - "echo"
+      - "ls"
+`
+	sampleLog := `
+{
+	"eventname": "bashReadline",
+	"source": "eBPF",
+	"timestamp": "2025-03-11T15:29:34+09:00",
+	"log": "A user has entered a command in the bash shell",
+	"metadata": {
+		"Commandline": "echo hello world",
+		"PID": 191998,
+		"UID": 1000,
+		"Username": "shhong"
+	}
+}
+	`
+
+	var sampleRule filter.Filter
+	// unmarshal yaml
+	err := yaml.Unmarshal([]byte(sample), &sampleRule)
+	if err != nil {
+		t.Fatalf("yaml.Unmarshal(%s) = %v, want nil", sample, err)
+	}
+	// unmarshal log
+	log := new(model.CommonLogWrapper)
+	err = json.Unmarshal([]byte(sampleLog), log)
+	if err != nil {
+		t.Fatalf("json.Unmarshal(%s) = %v, want nil", sampleLog, err)
+	}
+	// test
+	for selectionName, selection := range sampleRule.Allow {
+		selection, err := filter.NewRuleSelectionOperator(parser, selectionName, &selection)
+		if err != nil {
+			t.Fatalf("NewRuleOperate(%s) = nil, want not nil", sample)
+		}
+		out := selection.Operation(log)
+		if !out {
+			t.Fatalf("NewRuleOperate(%s) = %v, want true", selectionName, out)
+		}
+		t.Logf("NewRuleOperate(%s) = %v, want true", selectionName, out)
+	}
+}
+
+func TestNewRuleSelectionOperatorWithEndsWith(t *testing.T) {
+	sample := `
+allow:
   "filter_null":
     "eventname|endswith": "Readline"
+    "Username": "shhong"
 `
 	sampleLog := `
 {
@@ -192,8 +243,7 @@ detection:
 	}
 }
 	`
-
-	var sampleRule filter.Detection
+	var sampleRule filter.Filter
 	// unmarshal yaml
 	err := yaml.Unmarshal([]byte(sample), &sampleRule)
 	if err != nil {
@@ -206,79 +256,29 @@ detection:
 		t.Fatalf("json.Unmarshal(%s) = %v, want nil", sampleLog, err)
 	}
 	// test
-	for _, dval := range sampleRule.Detections {
-		for key, val := range dval {
-			dOPs, err := filter.NewRuleOperator(parser, key, &val)
-			if err != nil {
-				t.Fatalf("NewRuleOperate(%s) = nil, want not nil", sample)
-			}
-			out := dOPs.Operation(log)
-			if !out {
-				t.Fatalf("NewRuleOperate(%s) = %v, want true", key, out)
-			}
-			t.Logf("NewRuleOperate(%s) = %v, want true", key, out)
+	for selectionName, selection := range sampleRule.Allow {
+		selection, err := filter.NewRuleSelectionOperator(parser, selectionName, &selection)
+		if err != nil {
+			t.Fatalf("NewRuleOperate(%s) = nil, want not nil", sample)
 		}
-	}
-}
-
-func TestNewRuleOperator3(t *testing.T) {
-	sample := `
-detection:
-  "filter_null":
-    "eventname|contains|all":
-      - "bash"
-      - "hello"
-`
-	sampleLog := `
-{
-	"eventname": "bashReadline",
-	"source": "eBPF",
-	"timestamp": "2025-03-11T15:29:34+09:00",
-	"log": "A user has entered a command in the bash shell",
-	"metadata": {
-		"Commandline": "echo hello world",
-		"PID": 191998,
-		"UID": 1000,
-		"Username": "shhong"
-	}
-}
-	`
-
-	var sampleRule filter.Detection
-	// unmarshal yaml
-	err := yaml.Unmarshal([]byte(sample), &sampleRule)
-	if err != nil {
-		t.Fatalf("yaml.Unmarshal(%s) = %v, want nil", sample, err)
-	}
-	// unmarshal log
-	log := new(model.CommonLogWrapper)
-	err = json.Unmarshal([]byte(sampleLog), log)
-	if err != nil {
-		t.Fatalf("json.Unmarshal(%s) = %v, want nil", sampleLog, err)
-	}
-	// test
-	for _, dval := range sampleRule.Detections {
-		for key, val := range dval {
-			dOPs, err := filter.NewRuleOperator(parser, key, &val)
-			if err != nil {
-				t.Fatalf("NewRuleOperate(%s) = nil, want not nil", sample)
-			}
-			out := dOPs.Operation(log)
-			if out {
-				t.Fatalf("NewRuleOperate(%s) = %v, want false", key, out)
-			}
-			t.Logf("NewRuleOperate(%s) = %v, want false", key, out)
+		out := selection.Operation(log)
+		if !out {
+			t.Fatalf("NewRuleOperate(%s) = %v, want true", selectionName, out)
 		}
+		t.Logf("NewRuleOperate(%s) = %v, want true", selectionName, out)
 	}
 }
 
-func TestNewRuleOperator4(t *testing.T) {
+func TestNewRuleSelectionOperatorWithAll(t *testing.T) {
 	sample := `
-detection:
+allow:
   "filter_null":
     "Commandline|contains|all":
       - "echo"
       - "hello"
+    "source|endswith":
+      - "BPF"
+      - "PF"
 `
 	sampleLog := `
 {
@@ -294,8 +294,7 @@ detection:
 	}
 }
 	`
-
-	var sampleRule filter.Detection
+	var sampleRule filter.Filter
 	// unmarshal yaml
 	err := yaml.Unmarshal([]byte(sample), &sampleRule)
 	if err != nil {
@@ -308,28 +307,27 @@ detection:
 		t.Fatalf("json.Unmarshal(%s) = %v, want nil", sampleLog, err)
 	}
 	// test
-	for _, dval := range sampleRule.Detections {
-		for key, val := range dval {
-			dOPs, err := filter.NewRuleOperator(parser, key, &val)
-			if err != nil {
-				t.Fatalf("NewRuleOperate(%s) = nil, want not nil", sample)
-			}
-			out := dOPs.Operation(log)
-			if !out {
-				t.Fatalf("NewRuleOperate(%s) = %v, want true", key, out)
-			}
-			t.Logf("NewRuleOperate(%s) = %v, want true", key, out)
+	for selectionName, selection := range sampleRule.Allow {
+		selection, err := filter.NewRuleSelectionOperator(parser, selectionName, &selection)
+		if err != nil {
+			t.Fatalf("NewRuleOperate(%s) = nil, want not nil", sample)
 		}
+		out := selection.Operation(log)
+		if !out {
+			t.Fatalf("NewRuleOperate(%s) = %v, want true", selectionName, out)
+		}
+		t.Logf("NewRuleOperate(%s) = %v, want true", selectionName, out)
 	}
 }
 
-func TestNewRuleOperator5(t *testing.T) {
+func TestNewRuleSelectionOperatorWithAllError(t *testing.T) {
 	sample := `
-detection:
+allow:
   "filter_null":
-    "Commandline|all":
+    "eventname": "bashReadline"
+    "Commandline|contains|all":
       - "echo"
-      - "hello"
+      - "cat"
 `
 	sampleLog := `
 {
@@ -346,7 +344,7 @@ detection:
 }
 	`
 
-	var sampleRule filter.Detection
+	var sampleRule filter.Filter
 	// unmarshal yaml
 	err := yaml.Unmarshal([]byte(sample), &sampleRule)
 	if err != nil {
@@ -359,17 +357,114 @@ detection:
 		t.Fatalf("json.Unmarshal(%s) = %v, want nil", sampleLog, err)
 	}
 	// test
-	for _, dval := range sampleRule.Detections {
-		for key, val := range dval {
-			dOPs, err := filter.NewRuleOperator(parser, key, &val)
-			if err != nil {
-				t.Fatalf("NewRuleOperate(%s) = nil, want not nil", sample)
-			}
-			out := dOPs.Operation(log)
-			if out {
-				t.Fatalf("NewRuleOperate(%s) = %v, want false", key, out)
-			}
-			t.Logf("NewRuleOperate(%s) = %v, want false", key, out)
+	for selectionName, selection := range sampleRule.Allow {
+		selection, err := filter.NewRuleSelectionOperator(parser, selectionName, &selection)
+		if err != nil {
+			t.Fatalf("NewRuleOperate(%s) = nil, want not nil", sample)
 		}
+		out := selection.Operation(log)
+		if out {
+			t.Fatalf("NewRuleOperate(%s) = %v, want false", selectionName, out)
+		}
+		t.Logf("NewRuleOperate(%s) = %v, want false", selectionName, out)
 	}
+
+}
+
+func TestNewRuleSelectionOperatorWithNOT(t *testing.T) {
+	sample := `
+allow:
+  "!filter_null":
+    "eventname": "bashReadline"
+    "Commandline|contains|all":
+      - "echo"
+      - "cat"
+`
+	sampleLog := `
+{
+	"eventname": "bashReadline",
+	"source": "eBPF",
+	"timestamp": "2025-03-11T15:29:34+09:00",
+	"log": "A user has entered a command in the bash shell",
+	"metadata": {
+		"Commandline": "echo hello world",
+		"PID": 191998,
+		"UID": 1000,
+		"Username": "shhong"
+	}
+}
+	`
+
+	var sampleRule filter.Filter
+	// unmarshal yaml
+	err := yaml.Unmarshal([]byte(sample), &sampleRule)
+	if err != nil {
+		t.Fatalf("yaml.Unmarshal(%s) = %v, want nil", sample, err)
+	}
+	// unmarshal log
+	log := new(model.CommonLogWrapper)
+	err = json.Unmarshal([]byte(sampleLog), log)
+	if err != nil {
+		t.Fatalf("json.Unmarshal(%s) = %v, want nil", sampleLog, err)
+	}
+	// test
+	for selectionName, selection := range sampleRule.Allow {
+		selection, err := filter.NewRuleSelectionOperator(parser, selectionName, &selection)
+		if err != nil {
+			t.Fatalf("NewRuleOperate(%s) = nil, want not nil", sample)
+		}
+		out := selection.Operation(log)
+		if !out {
+			t.Fatalf("NewRuleOperate(%s) = %v, want true", selectionName, out)
+		}
+		t.Logf("NewRuleOperate(%s) = %v, want true", selectionName, out)
+	}
+
+}
+
+func TestNewRuleSelectionOperatorWithWrongCollectionName(t *testing.T) {
+	sample := `
+allow:
+  "fil!ter_null":
+    "eventname": "bashReadline"
+    "Commandline|contains|all":
+      - "echo"
+      - "cat"
+`
+	sampleLog := `
+{
+	"eventname": "bashReadline",
+	"source": "eBPF",
+	"timestamp": "2025-03-11T15:29:34+09:00",
+	"log": "A user has entered a command in the bash shell",
+	"metadata": {
+		"Commandline": "echo hello world",
+		"PID": 191998,
+		"UID": 1000,
+		"Username": "shhong"
+	}
+}
+	`
+
+	var sampleRule filter.Filter
+	// unmarshal yaml
+	err := yaml.Unmarshal([]byte(sample), &sampleRule)
+	if err != nil {
+		t.Fatalf("yaml.Unmarshal(%s) = %v, want nil", sample, err)
+	}
+	// unmarshal log
+	log := new(model.CommonLogWrapper)
+	err = json.Unmarshal([]byte(sampleLog), log)
+	if err != nil {
+		t.Fatalf("json.Unmarshal(%s) = %v, want nil", sampleLog, err)
+	}
+	// test
+	for selectionName, selection := range sampleRule.Allow {
+		_, err := filter.NewRuleSelectionOperator(parser, selectionName, &selection)
+		if err == nil {
+			t.Fatalf("NewRuleOperate(%s) != nil, want nil", selectionName)
+		}
+		t.Logf("selection name '%s' returns err: %v, want true", selectionName, err)
+	}
+
 }

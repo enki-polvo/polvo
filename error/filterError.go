@@ -5,7 +5,7 @@ import "fmt"
 type PolvoErrFilter int
 
 const (
-	ErrDetectionField PolvoErrFilter = iota
+	ErrCollectionField PolvoErrFilter = iota
 	ErrRuleField
 )
 
