@@ -44,28 +44,11 @@ const (
 type RuleSelectionOperator struct {
 	groupName string
 	rules     []Logic
-	isNot     bool
 }
 
 func NewRuleSelectionOperator(parser Parser, groupName string, rules *Rule) (Logic, error) {
 	rgOP := new(RuleSelectionOperator)
 	rgOP.groupName = groupName
-
-	// check group name is NOT operation
-	// If the group name starts with "!", it is a NOT operation.
-	if strings.HasPrefix(groupName, "!") {
-		rgOP.isNot = true
-	} else {
-		if strings.Contains(groupName, "!") {
-			// invalid group name
-			return nil, perror.PolvoFilterError{
-				Code:   perror.ErrRuleField,
-				Msg:    "error while NewRuleSelectionOperator",
-				Origin: fmt.Errorf("invalid group name. group name must be start with '!'"),
-			}
-		}
-		rgOP.isNot = false
-	}
 
 	// read rules from map
 	rgOP.rules = make([]Logic, 0)
@@ -85,13 +68,7 @@ func NewRuleSelectionOperator(parser Parser, groupName string, rules *Rule) (Log
 
 func (rgOP *RuleSelectionOperator) Operation(log *model.CommonLogWrapper) bool {
 	// set boolean with isAnd
-	switch rgOP.isNot {
-	case true:
-		return !And(rgOP.rules).Operation(log)
-	case false:
-		return And(rgOP.rules).Operation(log)
-	}
-	return false
+	return And(rgOP.rules).Operation(log)
 }
 
 // # RuleOperator
@@ -225,6 +202,8 @@ func (eOP *EventOperator) Operation(log *model.CommonLogWrapper) bool {
 		switch val := val.(type) {
 		case string:
 			strVal = val
+		case []string:
+			strVal = strings.Join(val, " ")
 		default:
 			strVal = fmt.Sprintf("%v", val)
 		}
