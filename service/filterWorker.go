@@ -2,7 +2,10 @@ package service
 
 import (
 	"context"
+	"fmt"
+	"os"
 	"polvo/compose"
+	"polvo/service/filter"
 	"polvo/service/model"
 	"sync"
 	"sync/atomic"
@@ -26,6 +29,9 @@ type filterWorker struct {
 	inboundChannel chan *model.CommonLogWrapper
 	// outbound pipes
 	outboundChannel []chan<- *model.CommonLogWrapper
+	// filter Operator
+	filterOperator filter.FilterOperator
+	returnFunc     func(*model.CommonLogWrapper)
 	// wait group for filter thread
 	waitForEndRemainTasks sync.WaitGroup
 }
@@ -34,19 +40,24 @@ func (w *filterWorker) LogChannel() chan<- *model.CommonLogWrapper {
 	return w.inboundChannel
 }
 
-func newFilterWorker(info *compose.SensorInfo, outboundChan ...chan<- *model.CommonLogWrapper) *filterWorker {
+func newFilterWorker(filterOp filter.FilterOperator, returnFunc func(*model.CommonLogWrapper), info *compose.SensorInfo, outboundChan ...chan<- *model.CommonLogWrapper) *filterWorker {
 	nw := new(filterWorker)
 
 	// dependency injection
 	nw.info = info
 	nw.eventHeader = info.EventsHeader
+	// init filter operator
+	// The relationship between filterWorker and filterOperator is has-a relationship.
+	// There are multiple filterWorkers and each filterWorker uses a singleton filterOperator.
+	// However, I judged it to be threadsafe because no write operation occurs in filteroperator.
+	nw.filterOperator = filterOp
+	nw.returnFunc = returnFunc
 	// context
 	nw.ctx, nw.cancel = context.WithCancel(context.Background())
 	// set channels
 	nw.inboundChannel = make(chan *model.CommonLogWrapper)
 	nw.outboundChannel = make([]chan<- *model.CommonLogWrapper, 0)
 	nw.outboundChannel = append(nw.outboundChannel, outboundChan...)
-	// init sync pool
 	return nw
 }
 
@@ -86,9 +97,16 @@ func (w *filterWorker) filterThread() {
 			return
 		case log = <-w.inboundChannel:
 			w.waitForEndRemainTasks.Add(1)
-			// process log
-			// TODO: filter log
-			// fmt.Printf("Filter Recv: %v\n", log)
+			// filter log
+			if w.filterOperator.Operation(log) {
+				// drop log if it is filtered
+				// put log to sync.Pool
+				fmt.Fprintf(os.Stderr, "log is filtered: %v\n", log)
+				w.returnFunc(log)
+				w.waitForEndRemainTasks.Done()
+				continue
+			}
+
 			// send to outbound channels
 			for _, outboundChannel = range w.outboundChannel {
 				// add ref count if log is sent to another worker
