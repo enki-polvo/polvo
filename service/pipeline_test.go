@@ -25,7 +25,6 @@ deny:
       "Commandline|contains":
         - "ls"
         - "cat"
-   
 `
 
 var (
