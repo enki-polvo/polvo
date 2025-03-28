@@ -15,6 +15,7 @@ const (
 	ErrPipelineUnmarshal
 	ErrPipelineMarshal
 	ErrInvalidExporterName
+	ErrFilterWorkerCreate
 	ErrExporterCreate
 	ErrProcessorCreate
 )
