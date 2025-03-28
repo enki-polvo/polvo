@@ -10,6 +10,7 @@ import (
 	"polvo/exporter"
 	plogger "polvo/logger"
 	"polvo/sensorPipe"
+	"polvo/service/filter"
 	"polvo/service/model"
 	"strings"
 	"sync"
@@ -30,8 +31,9 @@ type Service interface {
 
 type service struct {
 	// dependency injection
-	logger plogger.PolvoLogger
-	info   *compose.Compose
+	logger   plogger.PolvoLogger
+	info     *compose.Compose
+	filterOp filter.FilterOperator
 	// maps for workers
 	filterWorkerMap    map[string]*filterWorker
 	processorWorkerMap map[string]*processorWorker
@@ -52,13 +54,14 @@ type service struct {
 // 3. Create processor workers per pipeline.
 // 4. Create filter workers & sensorPipe per sensor pipeline.
 // Stop function operates in the opposite order.
-func NewService(info *compose.Compose, loger plogger.PolvoLogger) (Service, error) {
+func NewService(info *compose.Compose, loger plogger.PolvoLogger, filterOp filter.FilterOperator) (Service, error) {
 	// create service
 	svc := new(service)
 
 	// dependency injection
 	svc.logger = loger
 	svc.info = info
+	svc.filterOp = filterOp
 
 	// init sync pool
 	svc.logWrapperPool = sync.Pool{
@@ -193,7 +196,7 @@ func (svc *service) createFilterAndSensors(info compose.Compose, loger plogger.P
 	// create filter workers & sensorPipe per sensor pipeline
 	for _, sensorInfo := range info.Sensors {
 		// create filter workers
-		filterWorker := newFilterWorker(sensorInfo, pipeMap[sensorInfo.Name]...)
+		filterWorker := newFilterWorker(svc.filterOp, svc.returnLogObjectToPool, sensorInfo, pipeMap[sensorInfo.Name]...)
 		svc.filterWorkerMap[sensorInfo.Name] = filterWorker
 		// create worker per sensor
 		sensorPipe, err := sensorPipe.NewPipe(sensorInfo.Name, loger, filterWorker.LogChannel(), svc.jsonUnMarshalFunc)
@@ -354,6 +357,14 @@ func (s *service) Stop() error {
 * Service private methods
 ************************************************************************************************************/
 
+func (s *service) returnLogObjectToPool(logWrapper *model.CommonLogWrapper) {
+	// if ref count is 0, it means this wrapper is unused. return to pool
+	if atomic.LoadInt32(&logWrapper.RefCount) == 0 {
+		logWrapper.Tag = "USED"
+		s.logWrapperPool.Put(logWrapper)
+	}
+}
+
 func (s *service) jsonUnMarshalFunc(log string) (*model.CommonLogWrapper, error) {
 	// Reason for control sync pool flow in pipeline is to prevent GC overhead in massive data processing
 	// get from sync pool
@@ -380,9 +391,7 @@ func (s *service) jsonMarshalFunc(logWrapper *model.CommonLogWrapper) (ret []byt
 	ret, err = json.Marshal(logWrapper)
 	if err != nil {
 		// if ref count is 0, it means this wrapper is unused. return to pool
-		if atomic.LoadInt32(&logWrapper.RefCount) == 0 {
-			s.logWrapperPool.Put(logWrapper)
-		}
+		s.returnLogObjectToPool(logWrapper)
 		return nil, perror.PolvoPipelineError{
 			Code:   perror.ErrPipelineMarshal,
 			Origin: err,
@@ -391,10 +400,6 @@ func (s *service) jsonMarshalFunc(logWrapper *model.CommonLogWrapper) (ret []byt
 	}
 	// return to sync pool
 	// if ref count is 0, it means this wrapper is unused. return to pool
-	if atomic.LoadInt32(&logWrapper.RefCount) == 0 {
-		// fmt.Printf("Finally Recv: %v\n", logWrapper)
-		logWrapper.Tag = "USED"
-		s.logWrapperPool.Put(logWrapper)
-	}
+	s.returnLogObjectToPool(logWrapper)
 	return ret, nil
 }
