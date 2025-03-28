@@ -2,8 +2,6 @@ package service
 
 import (
 	"context"
-	"fmt"
-	"os"
 	"polvo/compose"
 	"polvo/service/filter"
 	"polvo/service/model"
@@ -30,17 +28,21 @@ type filterWorker struct {
 	// outbound pipes
 	outboundChannel []chan<- *model.CommonLogWrapper
 	// filter Operator
-	filterOperator filter.FilterOperator
-	returnFunc     func(*model.CommonLogWrapper)
+	filterOperator        filter.FilterOperator
+	returnLogObjectToPool func(*model.CommonLogWrapper)
 	// wait group for filter thread
 	waitForEndRemainTasks sync.WaitGroup
 }
 
-func (w *filterWorker) LogChannel() chan<- *model.CommonLogWrapper {
-	return w.inboundChannel
+func (fw *filterWorker) LogChannel() chan<- *model.CommonLogWrapper {
+	return fw.inboundChannel
 }
 
-func newFilterWorker(filterOp filter.FilterOperator, returnFunc func(*model.CommonLogWrapper), info *compose.SensorInfo, outboundChan ...chan<- *model.CommonLogWrapper) *filterWorker {
+func newFilterWorker(filterOperator filter.FilterOperator,
+	returnLogObjectToPool func(*model.CommonLogWrapper),
+	info *compose.SensorInfo,
+	outboundChan ...chan<- *model.CommonLogWrapper) *filterWorker {
+
 	nw := new(filterWorker)
 
 	// dependency injection
@@ -50,8 +52,8 @@ func newFilterWorker(filterOp filter.FilterOperator, returnFunc func(*model.Comm
 	// The relationship between filterWorker and filterOperator is has-a relationship.
 	// There are multiple filterWorkers and each filterWorker uses a singleton filterOperator.
 	// However, I judged it to be threadsafe because no write operation occurs in filteroperator.
-	nw.filterOperator = filterOp
-	nw.returnFunc = returnFunc
+	nw.filterOperator = filterOperator
+	nw.returnLogObjectToPool = returnLogObjectToPool
 	// context
 	nw.ctx, nw.cancel = context.WithCancel(context.Background())
 	// set channels
@@ -61,31 +63,31 @@ func newFilterWorker(filterOp filter.FilterOperator, returnFunc func(*model.Comm
 	return nw
 }
 
-func (w *filterWorker) Start() {
-	atomic.StoreInt32(&w.isRunning, 1)
-	go w.filterThread()
+func (fw *filterWorker) Start() {
+	atomic.StoreInt32(&fw.isRunning, 1)
+	go fw.filterThread()
 }
 
-func (w *filterWorker) Kill() error {
+func (fw *filterWorker) Kill() error {
 	// wait until all logs are processed
 	// This is useless live lock. Because in golang, channel can pop data when it is closed.
 	// So, this is just for safety.
 	for {
-		if len(w.inboundChannel) == 0 {
+		if len(fw.inboundChannel) == 0 {
 			break
 		}
 		time.Sleep(1 * time.Millisecond)
 	}
 	// cancel context to kill worker loop
-	w.cancel()
-	w.waitForEndRemainTasks.Wait()
-	atomic.StoreInt32(&w.isRunning, 0)
+	fw.cancel()
+	fw.waitForEndRemainTasks.Wait()
+	atomic.StoreInt32(&fw.isRunning, 0)
 	// close channel
-	close(w.inboundChannel)
+	close(fw.inboundChannel)
 	return nil
 }
 
-func (w *filterWorker) filterThread() {
+func (fw *filterWorker) filterThread() {
 	var (
 		log             *model.CommonLogWrapper
 		outboundChannel chan<- *model.CommonLogWrapper
@@ -93,27 +95,27 @@ func (w *filterWorker) filterThread() {
 
 	for {
 		select {
-		case <-w.ctx.Done():
+		case <-fw.ctx.Done():
 			return
-		case log = <-w.inboundChannel:
-			w.waitForEndRemainTasks.Add(1)
+		case log = <-fw.inboundChannel:
+			fw.waitForEndRemainTasks.Add(1)
 			// filter log
-			if w.filterOperator.Operation(log) {
+			if fw.filterOperator.Operation(log) {
 				// drop log if it is filtered
 				// put log to sync.Pool
-				fmt.Fprintf(os.Stderr, "log is filtered: %v\n", log)
-				w.returnFunc(log)
-				w.waitForEndRemainTasks.Done()
+				// fmt.Fprintf(os.Stderr, "log is filtered: %v\n", log)
+				fw.returnLogObjectToPool(log)
+				fw.waitForEndRemainTasks.Done()
 				continue
 			}
 
 			// send to outbound channels
-			for _, outboundChannel = range w.outboundChannel {
+			for _, outboundChannel = range fw.outboundChannel {
 				// add ref count if log is sent to another worker
 				atomic.AddInt32(&log.RefCount, 1)
 				outboundChannel <- log
 			}
-			w.waitForEndRemainTasks.Done()
+			fw.waitForEndRemainTasks.Done()
 		}
 	}
 }
