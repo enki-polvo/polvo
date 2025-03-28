@@ -10,11 +10,7 @@ import (
 // # FilterOperator
 //
 // FilterOperator implements filter operations based on a filter yaml file.
-// FilterOperation is divided into Allow and Deny.
 // If the Deny operation is true, the result is false.
-// If the Allow operation is true, the result is true.
-// If the Deny operation is false and the Allow operation is false, the result is true.
-// If the Deny operation is false and the Allow operation is true, the result is true.
 type FilterOperator interface {
 	Operation(log *model.CommonLogWrapper) bool
 }
@@ -22,7 +18,6 @@ type FilterOperator interface {
 type filterOperator struct {
 	parser    Parser
 	filterObj *Filter
-	allow     []Logic
 	deny      []Logic
 }
 
@@ -48,22 +43,9 @@ func NewFilterOperator(filterData []byte) (FilterOperator, error) {
 			Msg:    "error while NewFilterOperator",
 		}
 	}
-	// construct allow selections and deny selections
-	// construct allow selections
-	for allowSelectionName, allowSellections := range newFilterOP.filterObj.Allow {
-		allowSelection, err := NewRuleSelectionOperator(newFilterOP.parser, allowSelectionName, &allowSellections)
-		if err != nil {
-			return nil, perror.PolvoFilterError{
-				Code:   perror.ErrFilterConstructor,
-				Origin: err,
-				Msg:    "error while NewFilterOperator",
-			}
-		}
-		newFilterOP.allow = append(newFilterOP.allow, allowSelection)
-	}
 	// construct deny selections
 	for denySelectionName, denySellections := range newFilterOP.filterObj.Deny {
-		denySelection, err := NewRuleSelectionOperator(newFilterOP.parser, denySelectionName, &denySellections)
+		denySelection, err := NewDenyOperator(newFilterOP.parser, denySelectionName, &denySellections)
 		if err != nil {
 			return nil, perror.PolvoFilterError{
 				Code:   perror.ErrFilterConstructor,
@@ -77,18 +59,63 @@ func NewFilterOperator(filterData []byte) (FilterOperator, error) {
 }
 
 // FilterOperation works as Follows:
-// 1. Check Deny First, then Allow
-// 2. If Deny is true, then return false
-// 3. If Allow is true, then return true
-// 4. If Deny is false and Allow is false, then return true
-// 5. If Deny is false and Allow is true, then return true
+// 1. If Operation returns true, log will be denied
+// 2. If Operation returns false, log will be allowed
+// 3. If exception returns true, log will be allowed
 func (f *filterOperator) Operation(log *model.CommonLogWrapper) bool {
-	var (
-		denyResult  bool
-		allowResult bool
-	)
 	// check Deny First, then Allow
-	denyResult = Or(f.deny).Operation(log)
-	allowResult = Or(f.allow).Operation(log)
-	return !denyResult || allowResult
+	return Or(f.deny).Operation(log)
+}
+
+type DenyOperator struct {
+	selectionName string
+	condition     []Logic
+	exception     []Logic
+}
+
+func NewDenyOperator(parser Parser, selectionName string, rules *Deny) (Logic, error) {
+	dOP := new(DenyOperator)
+	dOP.selectionName = selectionName
+
+	// read rules from condition map
+	dOP.condition = make([]Logic, 0)
+	dOP.exception = make([]Logic, 0)
+	for key, val := range rules.Condition {
+		rOP, err := NewRuleOperator(parser, key, &val)
+		if err != nil {
+			return nil, perror.PolvoFilterError{
+				Code:   perror.ErrRuleField,
+				Msg:    "error while NewDenyOperator",
+				Origin: err,
+			}
+		}
+		dOP.condition = append(dOP.condition, rOP)
+	}
+	// read rules from exception map
+	for key, val := range rules.Exception {
+		rOP, err := NewRuleOperator(parser, key, &val)
+		if err != nil {
+			return nil, perror.PolvoFilterError{
+				Code:   perror.ErrRuleField,
+				Msg:    "error while NewDenyOperator",
+				Origin: err,
+			}
+		}
+		dOP.exception = append(dOP.exception, rOP)
+	}
+	return dOP, nil
+}
+
+// Operation works as Follows:
+// 1. If Operation returns true, log will be denied
+// 2. If Operation returns false, log will be allowed
+// 3. If exception returns true, log will be allowed
+func (dOP *DenyOperator) Operation(log *model.CommonLogWrapper) bool {
+	var (
+		denyResult      bool
+		exceptionResult bool
+	)
+	denyResult = Or(dOP.condition).Operation(log)
+	exceptionResult = Or(dOP.exception).Operation(log)
+	return denyResult && !exceptionResult
 }

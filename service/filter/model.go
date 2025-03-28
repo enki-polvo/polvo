@@ -6,10 +6,12 @@ import (
 
 type Rule map[string]yaml.Node
 
-type Selections map[string]Rule
+type Deny struct {
+	Condition Rule `yaml:"condition"`
+	Exception Rule `yaml:"exception,omitempty"`
+}
 
 type Filter struct {
-	Version string     `yaml:"version"`
-	Allow   Selections `yaml:"allow"`
-	Deny    Selections `yaml:"deny"`
+	Version string          `yaml:"version"`
+	Deny    map[string]Deny `yaml:"deny"`
 }
