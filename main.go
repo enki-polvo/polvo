@@ -9,6 +9,7 @@ import (
 	"polvo/compose"
 	plogger "polvo/logger"
 	"polvo/service"
+	"polvo/service/filter"
 	"syscall"
 )
 
@@ -34,6 +35,7 @@ func main() {
 	var (
 		loger    plogger.PolvoLogger
 		composer compose.ComposeFile
+		filterOp filter.FilterOperator
 		svc      service.Service
 		exitCode int
 	)
@@ -54,7 +56,20 @@ func main() {
 		loger.Close()
 		panic(err)
 	}
-	svc, err = service.NewService(composer.GetCompose(), loger)
+
+	// init filter operator
+	filterData, err := os.ReadFile(filepath.Join(pwd, os.Args[2]))
+	if err != nil {
+		loger.Close()
+		panic(err)
+	}
+	filterOp, err = filter.NewFilterOperator(filterData)
+	if err != nil {
+		loger.Close()
+		panic(err)
+	}
+
+	svc, err = service.NewService(composer.GetCompose(), loger, filterOp)
 	if err != nil {
 		loger.Close()
 		panic(err)

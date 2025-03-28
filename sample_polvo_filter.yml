@@ -1,0 +1,11 @@
+version: 0.0.0
+
+allow:
+  !filter_file:
+    "eventname|endswith": "Readline"
+    "Username": "shhong"
+
+Deny:
+  filter_null:
+    "eventname|endswith": "Readline"
+    "Username": "shhong"

@@ -7,15 +7,32 @@ import (
 	"polvo/compose"
 	plogger "polvo/logger"
 	"polvo/service"
+	"polvo/service/filter"
 	"testing"
 	"time"
 )
+
+const sampleFilter = `
+version: 1.0
+deny:
+  "filter_test":
+    "condition":
+      "eventname|contains":
+        - "bashReadline"
+    "exception":
+      "eventname|contains":
+        - "process"
+      "Commandline|contains":
+        - "ls"
+        - "cat"
+`
 
 var (
 	pwd      string
 	loger    plogger.PolvoLogger
 	logpath  string
 	composer compose.ComposeFile
+	filterOp filter.FilterOperator
 )
 
 func TestMain(m *testing.M) {
@@ -38,6 +55,12 @@ func TestMain(m *testing.M) {
 	}
 	// print compose
 	fmt.Printf("%v\n", composer.String())
+	// filter operator
+	filterOp, err = filter.NewFilterOperator([]byte(sampleFilter))
+	if err != nil {
+		loger.Close()
+		panic(err)
+	}
 	// run tests
 	code := m.Run()
 	// teardown
@@ -50,7 +73,7 @@ func TestMain(m *testing.M) {
 
 func TestService(t *testing.T) {
 	// create service
-	serv, err := service.NewService(composer.GetCompose(), loger)
+	serv, err := service.NewService(composer.GetCompose(), loger, filterOp)
 	if err != nil {
 		t.Errorf("error while create service %v", err)
 		return

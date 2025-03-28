@@ -1,4 +1,4 @@
-package service
+package model
 
 type CommonLogWrapper struct {
 	// Common log Header
